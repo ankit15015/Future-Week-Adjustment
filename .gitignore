@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+
+# User-uploaded / generated files - never commit real data
+uploads/
+output/
+
+# Downloaded third-party binary - not source, re-fetched by users who need it
+tools/cloudflared.exe

@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Future Week Adjustment</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div id="splash">
+  <div class="splash-mark"></div>
+  <h1>Future Week Adjustment</h1>
+</div>
+
+<div id="mode-select" class="hidden">
+  <div class="mode-select-inner">
+    <p class="eyebrow">Future Week Adjustment</p>
+    <h1>What are you doing today?</h1>
+    <div class="mode-cards">
+      <button class="mode-card is-live" data-mode="standard">
+        <span class="mode-title">Standard</span>
+        <span class="mode-desc">Copy Headcount from a Base Layer into an Opportunities file, as-is.</span>
+        <span class="mode-go">Start &rarr;</span>
+      </button>
+      <button class="mode-card is-live" data-mode="reduce">
+        <span class="mode-title">Reduce</span>
+        <span class="mode-desc">Trim headcount against a target before writing it out.</span>
+        <span class="mode-go">Start &rarr;</span>
+      </button>
+      <button class="mode-card is-live" data-mode="overstaffed">
+        <span class="mode-title">Overstaffed</span>
+        <span class="mode-desc">Flag and redistribute shifts that are running over.</span>
+        <span class="mode-go">Start &rarr;</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div id="mode-gate" class="hidden">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <span class="topbar-brand">Future Week Adjustment</span>
+      <button id="gate-back-btn" class="link-btn">&larr; Back to mode select</button>
+    </div>
+  </header>
+  <main class="placeholder-main">
+    <section class="card placeholder-card">
+      <h2 id="gate-title"></h2>
+      <p>Do you want to opt out of reducing hours cap?</p>
+      <div class="gate-actions">
+        <button id="gate-yes-btn" class="primary">Yes &mdash; opt out</button>
+        <button id="gate-no-btn" class="secondary">No &mdash; keep the cap reduction</button>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="cap-notice" class="hidden">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <span class="topbar-brand">Future Week Adjustment</span>
+      <button id="cap-notice-back-btn" class="link-btn">&larr; Back to mode select</button>
+    </div>
+  </header>
+  <main class="placeholder-main">
+    <section class="card placeholder-card">
+      <h2>Adjust your max cap setting</h2>
+      <p>You chose to keep the hours-cap reduction, so adjust the max cap setting in Amazon Scheduling before continuing here.</p>
+      <a href="https://scheduling.amazon.com/#/site-settings-edit" target="_blank" rel="noopener noreferrer" class="cap-link">Open site settings &rarr;</a>
+    </section>
+  </main>
+</div>
+
+<div id="standard-mode" class="hidden">
+<header class="topbar">
+  <div class="topbar-inner">
+    <span class="topbar-brand">Future Week Adjustment <span class="topbar-mode" id="standard-mode-badge">Standard</span></span>
+    <button id="standard-back-btn" class="link-btn">&larr; Change mode</button>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="rail" id="step-rail">
+    <ol>
+      <li class="rail-step" data-rail="source"><span class="rail-dot"></span><span class="rail-label">Source</span></li>
+      <li class="rail-step" data-rail="min-hours"><span class="rail-dot"></span><span class="rail-label">Minimum hours</span></li>
+      <li class="rail-step" data-rail="one-percent"><span class="rail-dot"></span><span class="rail-label">1% rule</span></li>
+      <li class="rail-step" data-rail="dest"><span class="rail-dot"></span><span class="rail-label">Destination</span></li>
+      <li class="rail-step" data-rail="match"><span class="rail-dot"></span><span class="rail-label">Match</span></li>
+      <li class="rail-step" data-rail="reason"><span class="rail-dot"></span><span class="rail-label">Reason</span></li>
+      <li class="rail-step" data-rail="export"><span class="rail-dot"></span><span class="rail-label">Download</span></li>
+    </ol>
+  </nav>
+
+  <main>
+
+    <section class="card" id="step-source">
+      <h2>Source <span class="h2-sub">Base Layer &mdash; headcount by shift &times; day &times; workgroup</span></h2>
+      <div class="picker-row">
+        <select id="source-file-select"><option value="">Loading files from folder&hellip;</option></select>
+        <button id="source-load-btn" class="primary">Load selected</button>
+        <span class="or">or</span>
+        <label class="upload-btn">Upload file
+          <input type="file" id="source-upload-input" hidden>
+        </label>
+      </div>
+      <div id="source-status" class="status"></div>
+      <div id="source-warnings" class="warnings"></div>
+      <div id="source-table-wrap" class="table-wrap hidden">
+        <div class="table-toolbar">
+          <span id="source-summary"></span>
+          <button id="source-add-row" class="secondary small">+ Add row</button>
+          <button id="source-save" class="secondary small">Save edits</button>
+        </div>
+        <table id="source-table">
+          <thead>
+            <tr>
+              <th>Workgroup</th><th>Day</th><th>Shift name</th><th>Start</th><th>End</th><th>Headcount</th><th></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card hidden" id="step-min-hours">
+      <h2>Confirm minimum hours <span class="h2-sub">per workgroup</span></h2>
+      <p class="summary-line">This source file has a Minimum Hours requirement for the workgroup(s) below. Enter the hours you're committing to for each &mdash; you must meet or exceed the source file's minimum before you can load a destination file.</p>
+      <div id="min-hours-groups"></div>
+      <button id="min-hours-confirm-btn" class="primary">Confirm minimum hours</button>
+      <div id="min-hours-status" class="status"></div>
+    </section>
+
+    <section class="card hidden" id="step-one-percent">
+      <h2>1% rule verification <span class="h2-sub">checked automatically from the source file</span></h2>
+      <p class="summary-line">For each shift, the baseline is ceil(workgroup's Minimum Hours &times; 1% &divide; shift length) &mdash; this matches the source file's own '1% Rule' figure. Every day of the week for that shift is then checked against its baseline individually.</p>
+      <div id="one-percent-status" class="status"></div>
+      <div class="one-percent-toolbar">
+        <label><input type="checkbox" id="one-percent-show-all"> Show passing days too</label>
+        <button id="one-percent-fix-all-btn" class="secondary small hidden">Fix all shortfalls</button>
+      </div>
+      <div class="table-wrap">
+        <table id="one-percent-table">
+          <thead>
+            <tr><th>Workgroup</th><th>Shift</th><th>Day</th><th>Headcount</th><th>Baseline</th><th>Result</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="step-dest">
+      <h2>Destination <span class="h2-sub">Opportunities file</span></h2>
+      <div id="dest-locked-msg" class="lock-msg">Load a source file (and confirm minimum hours, if required) first.</div>
+      <div id="dest-controls" class="hidden">
+        <div class="picker-row">
+          <select id="dest-file-select"><option value="">Loading files from folder&hellip;</option></select>
+          <button id="dest-load-btn" class="primary">Load selected</button>
+          <span class="or">or</span>
+          <label class="upload-btn">Upload file
+            <input type="file" id="dest-upload-input" hidden>
+          </label>
+        </div>
+        <div id="dest-status" class="status"></div>
+        <div id="dest-summary-wrap" class="hidden">
+          <p id="dest-summary" class="summary-line"></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="step-match">
+      <h2>Match &amp; review <span class="h2-sub">Headcount &mdash; Column H</span></h2>
+      <button id="match-btn" class="primary" disabled>Run match</button>
+      <div id="match-summary" class="summary-chips"></div>
+      <div id="match-table-wrap" class="table-wrap hidden">
+        <div class="filter-bar">
+          <select id="filter-workgroup"><option value="">All workgroups</option></select>
+          <select id="filter-day"><option value="">All days</option></select>
+          <select id="filter-confidence">
+            <option value="">All confidence levels</option>
+            <option value="exact">Exact</option>
+            <option value="near">Near</option>
+            <option value="far">Far</option>
+            <option value="no_source_match">No source match</option>
+            <option value="no_time">No time</option>
+          </select>
+          <input type="text" id="filter-search" placeholder="Search workgroup, shift, or reason&hellip;">
+          <button id="filter-reset-btn" class="secondary small">Reset filters</button>
+          <span id="filter-count" class="filter-count"></span>
+        </div>
+        <table id="match-table">
+          <thead>
+            <tr>
+              <th>#</th><th>Workgroup</th><th>Day</th><th>Start</th><th>End</th>
+              <th>Old Headcount</th><th>New Headcount</th><th>Confidence</th><th>Reason</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card" id="step-reason">
+      <h2>Reason <span class="h2-sub">Column L &mdash; you type this in</span></h2>
+      <div class="group-toggle">
+        Group reasons by:
+        <label><input type="radio" name="group-by" value="workgroup" checked> Workgroup</label>
+        <label><input type="radio" name="group-by" value="shift_type"> Shift type (start&ndash;end time)</label>
+      </div>
+      <div id="reason-groups"></div>
+      <div class="default-reason-row">
+        <label for="default-reason">Default / fallback reason (used for anything not covered above):</label>
+        <input type="text" id="default-reason" placeholder="e.g. Weekly baselayer alignment">
+      </div>
+      <button id="reason-preview-btn" class="secondary">Preview reasons in table above</button>
+    </section>
+
+    <section class="card" id="step-export">
+      <h2>Apply &amp; download</h2>
+      <button id="export-btn" class="primary" disabled>Apply &amp; download updated file</button>
+      <div id="export-status" class="status"></div>
+    </section>
+
+  </main>
+</div>
+</div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
