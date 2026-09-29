@@ -42,6 +42,23 @@ pip install -r requirements.txt
    `<original name> - Updated.csv` (or `.xlsx`) into `dashboard/output/`,
    with everything else in the file untouched, and gives you a download link.
 
+## Deploy (e.g. for teammates to test)
+
+This repo includes a `render.yaml`, so on [Render](https://render.com):
+
+1. Sign up / log in (free), then **New +** -> **Blueprint**.
+2. Connect this GitHub repo - Render reads `render.yaml` and configures itself.
+3. Click **Apply**. After the build finishes you get a public `https://...onrender.com` URL to share.
+
+Notes for the deployed version specifically:
+- The "pick a file already in the folder" dropdowns will be empty there (that
+  only lists files sitting next to the app on *your own* machine) - use the
+  **Upload file** buttons instead, which work the same either way.
+- Free tier spins down after inactivity, so the first request after a while
+  takes ~30-60s to wake back up.
+- Uploaded/generated files live only for that running instance - they're
+  cleared on every redeploy.
+
 ## Notes
 
 - Nothing here is deleted/overwritten in place - the original file you picked

@@ -296,7 +296,7 @@ def api_download(filename):
 
 
 if __name__ == '__main__':
-    port = 5057
+    port = int(os.environ.get('PORT', 5057))
     url = f"http://127.0.0.1:{port}/"
     threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     print(f"Dashboard running at {url}")
