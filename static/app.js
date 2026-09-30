@@ -700,7 +700,7 @@ function enterModeGate(mode) {
   const yesBtn = el('gate-yes-btn');
   const noBtn = el('gate-no-btn');
   const onYes = () => { enterStandardMode(mode); cleanup(); };
-  const onNo = () => { enterCapNotice(); cleanup(); };
+  const onNo = () => { enterCapNotice(mode); cleanup(); };
   function cleanup() {
     yesBtn.removeEventListener('click', onYes);
     noBtn.removeEventListener('click', onNo);
@@ -709,9 +709,12 @@ function enterModeGate(mode) {
   noBtn.addEventListener('click', onNo);
 }
 
-function enterCapNotice() {
+function enterCapNotice(mode) {
   hideAllScreens();
   el('cap-notice').classList.remove('hidden');
+  const continueBtn = el('cap-notice-continue-btn');
+  const onContinue = () => { enterStandardMode(mode); continueBtn.removeEventListener('click', onContinue); };
+  continueBtn.addEventListener('click', onContinue);
 }
 
 document.querySelectorAll('.mode-card').forEach(card => {

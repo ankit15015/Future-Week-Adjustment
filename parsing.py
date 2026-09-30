@@ -209,6 +209,7 @@ def parse_blocks_from_grid(grid):
             continue
 
         r2 = hr + 1
+        anchor_start_minutes = None
         while r2 <= max_row:
             row_vals = dict(grid.get(r2, []))
             if shift_col not in row_vals or row_vals[shift_col] in (None, ''):
@@ -218,6 +219,21 @@ def parse_blocks_from_grid(grid):
                 break
             start_t = to_time(row_vals.get(start_col))
             end_t = to_time(row_vals.get(end_col))
+
+            # A shift whose own start time is earlier than the block's first
+            # (anchor) shift is the early-morning tail of the PREVIOUS day's
+            # overnight period (e.g. a "P6" starting 02:45, right after a "P5"
+            # starting 21:00) - its headcount belongs to the day AFTER its
+            # column's literal label, not the literal label itself. Verified
+            # against a real Base Layer + destination file example.
+            is_early_tail = False
+            if start_t is not None:
+                start_minutes = start_t.hour * 60 + start_t.minute
+                if anchor_start_minutes is None:
+                    anchor_start_minutes = start_minutes
+                elif start_minutes < anchor_start_minutes:
+                    is_early_tail = True
+
             for col in day_cols:
                 hc_raw = row_vals.get(col)
                 if hc_raw in (None, ''):
@@ -226,9 +242,12 @@ def parse_blocks_from_grid(grid):
                     hc = float(hc_raw)
                 except (TypeError, ValueError):
                     continue
+                weekday = weekday_by_col[col]
+                if is_early_tail:
+                    weekday = WEEKDAYS[(WEEKDAYS.index(weekday) + 1) % 7]
                 records.append({
                     'workgroup': workgroup_by_col[col],
-                    'weekday': weekday_by_col[col],
+                    'weekday': weekday,
                     'shift_name': shift_name,
                     'start_time': time_to_str(start_t),
                     'end_time': time_to_str(end_t),
