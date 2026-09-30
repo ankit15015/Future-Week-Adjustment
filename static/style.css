@@ -108,13 +108,27 @@ h1, h2, h3 { font-weight: 650; letter-spacing: -0.01em; }
   padding: 20px;
 }
 .mode-select-inner { text-align: left; max-width: 800px; width: 100%; }
-.mode-select-inner .eyebrow {
-  color: var(--accent-ink);
-  font-size: 13px;
-  font-weight: 600;
-  margin: 0 0 6px;
+.brand-row { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 3px 10px rgba(201, 138, 31, 0.28);
 }
-.mode-select-inner h1 { font-size: 26px; margin: 0 0 28px; }
+.mode-select-inner h1 {
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--ink);
+}
+.mode-select-subtitle {
+  color: var(--muted);
+  font-size: 14.5px;
+  margin: 0 0 30px;
+}
 .mode-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
