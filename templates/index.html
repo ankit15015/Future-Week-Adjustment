@@ -217,7 +217,20 @@
 
     <section class="card" id="step-export">
       <h2>Apply &amp; download</h2>
-      <button id="export-btn" class="primary" disabled>Apply &amp; download updated file</button>
+      <button id="export-review-btn" class="primary" disabled>Show final result</button>
+      <div id="export-review-wrap" class="hidden">
+        <p class="summary-line" id="export-review-text"></p>
+        <div class="table-wrap">
+          <table id="export-preview-table">
+            <thead>
+              <tr><th>#</th><th>Workgroup</th><th>Day</th><th>New Headcount</th><th>Reason</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="export-confirm-note">This is exactly what will be written to the file. Check it, then confirm below.</p>
+        <button id="export-confirm-btn" class="primary">Confirm &amp; download updated file</button>
+      </div>
       <div id="export-status" class="status"></div>
     </section>
 

@@ -12,12 +12,15 @@ const state = {
 };
 
 function updateStepRail() {
-  const minHoursNeeded = Object.keys(state.minimumHours).length > 0;
-  const onePercentNeeded = state.onePercentResults.length > 0;
+  const sourceLoaded = state.sourceRecords.length > 0;
+  // Only known to be skippable once a source file has actually been checked -
+  // before that, show them as regular upcoming steps, not "not needed".
+  const minHoursSkipped = sourceLoaded && Object.keys(state.minimumHours).length === 0;
+  const onePercentSkipped = sourceLoaded && state.onePercentResults.length === 0;
   const steps = [
-    { key: 'source', done: state.sourceRecords.length > 0 },
-    { key: 'min-hours', done: state.minHoursOk, skipped: !minHoursNeeded },
-    { key: 'one-percent', done: state.onePercentOk, skipped: !onePercentNeeded },
+    { key: 'source', done: sourceLoaded },
+    { key: 'min-hours', done: sourceLoaded && state.minHoursOk, skipped: minHoursSkipped },
+    { key: 'one-percent', done: sourceLoaded && state.onePercentOk, skipped: onePercentSkipped },
     { key: 'dest', done: state.destLoaded },
     { key: 'match', done: state.matchResults.length > 0 },
     { key: 'reason', done: state.reasonedResults.length > 0 },
@@ -28,8 +31,14 @@ function updateStepRail() {
     const li = document.querySelector(`.rail-step[data-rail="${s.key}"]`);
     if (!li) return;
     li.classList.remove('is-done', 'is-current', 'is-skipped');
+    const existingNote = li.querySelector('.rail-note');
+    if (existingNote) existingNote.remove();
     if (s.skipped) {
       li.classList.add('is-skipped');
+      const note = document.createElement('span');
+      note.className = 'rail-note';
+      note.textContent = 'not needed here';
+      li.appendChild(note);
     } else if (s.done) {
       li.classList.add('is-done');
     } else if (!currentSet) {
@@ -459,7 +468,8 @@ el('match-btn').addEventListener('click', async () => {
     renderMatchSummary(data.summary);
     setResultsAndRender(data.results, true);
     renderReasonGroups();
-    el('export-btn').disabled = false;
+    el('export-review-btn').disabled = false;
+    el('export-review-wrap').classList.add('hidden');
     updateStepRail();
   } catch (e) {
     alert('Error running match: ' + e.message);
@@ -610,13 +620,40 @@ el('reason-preview-btn').addEventListener('click', async () => {
 
 // ---------------------------------------------------------------- export
 
-el('export-btn').addEventListener('click', async () => {
+function isUnmatched(r) {
+  return r.new_headcount === null || r.new_headcount === undefined;
+}
+
+el('export-review-btn').addEventListener('click', async () => {
+  el('export-review-btn').disabled = true;
   try {
-    await previewReasons();
+    const results = await previewReasons();
+    const total = results.length;
+    const unmatched = results.filter(isUnmatched).length;
+    const matched = total - unmatched;
+    el('export-review-text').textContent =
+      `${total} row(s) total — ${matched} will get an updated Headcount` +
+      (unmatched ? `, ${unmatched} have no source match and will keep their original Headcount (flagged below).` : '.');
+    const tbody = document.querySelector('#export-preview-table tbody');
+    tbody.innerHTML = results.map(r => `
+      <tr class="${isUnmatched(r) ? 'row-failed' : ''}">
+        <td>${r.index + 1}</td>
+        <td>${escapeHtml(r.workgroup)}</td>
+        <td>${escapeHtml(r.weekday || '')}</td>
+        <td>${isUnmatched(r) ? `(unchanged: ${escapeHtml(r.old_headcount)})` : r.new_headcount}</td>
+        <td>${escapeHtml(r.reason || '')}</td>
+      </tr>
+    `).join('');
+    el('export-review-wrap').classList.remove('hidden');
+    setStatus(el('export-status'), '', '');
   } catch (e) {
-    alert('Error applying reasons before export: ' + e.message);
-    return;
+    alert('Error preparing final result: ' + e.message);
+  } finally {
+    el('export-review-btn').disabled = false;
   }
+});
+
+el('export-confirm-btn').addEventListener('click', async () => {
   setStatus(el('export-status'), 'Writing updated file…');
   try {
     const data = await api('/api/export', { method: 'POST' });
