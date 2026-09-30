@@ -87,7 +87,7 @@ def _build_result(fieldnames, rows, ext, sheet_name=None, source_path=None):
             'workgroup': str(row.get(wg_header, '')).strip(),
             'start_dt': start_dt,
             'end_dt': end_dt,
-            'weekday': start_dt.strftime('%A') if start_dt else None,
+            'weekday': _shift_weekday(start_dt, end_dt),
             'start_time': start_dt.time() if start_dt else None,
             'end_time': end_dt.time() if end_dt else None,
             'old_headcount': str(row.get(hc_header, '')).strip(),
@@ -108,6 +108,22 @@ def _build_result(fieldnames, rows, ext, sheet_name=None, source_path=None):
             'end': end_header,
         },
     }
+
+
+def _shift_weekday(start_dt, end_dt):
+    """
+    The day a shift instance belongs to. For a same-day shift this is just
+    the start's day. For an overnight shift (end falls on the calendar day
+    after start - e.g. Monday 23:45 to Tuesday 05:00), the source Base
+    Layer's day columns represent the after-midnight/morning side of the
+    shift, not the evening it started on - so it belongs to the END date's
+    weekday, not the start date's.
+    """
+    if not start_dt:
+        return None
+    if end_dt and end_dt.date() > start_dt.date():
+        return end_dt.strftime('%A')
+    return start_dt.strftime('%A')
 
 
 def _parse_datetime(raw):
