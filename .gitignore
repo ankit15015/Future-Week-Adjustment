@@ -13,9 +13,6 @@ instance/
 # Local configuration / secrets
 .env
 
-# Downloaded third-party binary - not source, re-fetched by users who need it
-scripts/cloudflared.exe
-
 # Editors / OS
 .vscode/
 .idea/

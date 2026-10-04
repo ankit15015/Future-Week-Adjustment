@@ -44,8 +44,6 @@ been run here (there is no CI), so run `pytest` on 3.11 before relying on it.
   out of the box when the repo sits next to the data files. Set `DASHBOARD_DATA_DIR` otherwise.
 - **Do not commit real data.** `instance/` and `.env` are git-ignored; keep it that way. Test
   data is synthetic (see `tests/conftest.py`).
-- `scripts/cloudflared.exe` is a 55 MB downloaded binary and must stay out of git (it is
-  ignored).
 
 ## Maintenance checklist
 

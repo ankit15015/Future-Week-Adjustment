@@ -50,12 +50,9 @@ Things to know about the deployed copy:
 
 ## Sharing a local run with a teammate (Windows)
 
-Temporary public links to your machine, for quick testing. Start the dashboard first, then:
+For a quick test with a teammate you can give them a temporary public link to your machine.
+Start the dashboard first, then run `scripts/share-via-ssh.ps1`. It tunnels through `localhost.run`
+using the Windows OpenSSH client, so nothing needs to be downloaded.
 
-| Script | How it works |
-| --- | --- |
-| `scripts/share-via-cloudflare.bat` | Cloudflare quick tunnel. Needs `cloudflared.exe` placed in `scripts/` (git-ignored; download from the cloudflared releases page). |
-| `scripts/share-via-ssh.ps1` | Tunnel through `localhost.run` using the Windows OpenSSH client. No download needed. |
-
-Keep the window open while the link is in use. These links have **no authentication** either, and
-they point at whatever data your dashboard can see.
+Keep the window open while the link is in use. The link has **no authentication**, and it points
+at whatever data your dashboard can see. For anything longer-lived, use the Render deployment.
