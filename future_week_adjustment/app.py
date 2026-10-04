@@ -216,6 +216,9 @@ def api_destination():
 
     sdata['destination'] = loaded
     sdata['destination_filename'] = orig_name
+    # Results from a previous destination no longer line up with its rows - force a re-match.
+    sdata.pop('match_results', None)
+    sdata.pop('reasoned_results', None)
 
     workgroups = sorted(set(r['workgroup'] for r in loaded['rows'] if r['workgroup']))
     weekdays_present = sorted(set(r['weekday'] for r in loaded['rows'] if r['weekday']), key=base_layer.WEEKDAYS.index)
@@ -276,30 +279,48 @@ def api_reasons_preview():
     return jsonify({'results': results})
 
 
-def build_final_rows(results):
+def build_final_rows(loaded, results):
     """
     Single source of truth for the final result. Returns (rows, updates):
-      rows    - what the "Apply & download" table shows, i.e. the value each row will
-                hold in the downloaded file.
+      rows    - what the "Apply & download" table shows. Each row carries `values`: every
+                column of the output file, exactly as it will be written (built by the same
+                opportunities.output_values the file writer uses), and `changed`: the
+                columns whose value differs from the original file.
       updates - the cell changes written to the file (None = leave the original cell alone).
     A row with no source match keeps its original Headcount, and a blank reason keeps the
-    original Reason cell, so `rows` shows those originals rather than a blank.
+    original Reason cell, so `values` holds those originals rather than a blank.
     """
+    headcount_col = loaded['headers']['headcount']
+    reason_col = loaded['headers']['reason']
+    parsed_by_index = {p['index']: p for p in loaded['rows']}
     rows = []
     updates = {}
     for r in results:
-        new_headcount = r['new_headcount']
+        new_headcount = opportunities.clean_headcount(r['new_headcount'])
         new_reason = r.get('reason') or None
-        updates[r['index']] = {'headcount': new_headcount, 'reason': new_reason}
+        update = {'headcount': new_headcount, 'reason': new_reason}
+        updates[r['index']] = update
+
+        parsed = parsed_by_index[r['index']]
+        values = {col: opportunities.format_cell(v)
+                  for col, v in opportunities.output_values(loaded, parsed, update).items()}
+        original = {col: opportunities.format_cell(v) for col, v in parsed['raw'].items()}
         rows.append({
             'index': r['index'],
             'workgroup': r['workgroup'],
+            'workgroups': r['workgroups'],
             'weekday': r['weekday'],
+            'date': r['date'],
             'start_time': r['start_time'],
             'end_time': r['end_time'],
-            'headcount': new_headcount if new_headcount is not None else r['old_headcount'],
+            'headcount': values[headcount_col],
+            'reason': values[reason_col],
             'updated': new_headcount is not None,
-            'reason': new_reason if new_reason is not None else r['old_reason'],
+            'confidence': r['confidence'],                 # review-only context, not written to the file
+            'matched_shift_name': r['matched_shift_name'],  # review-only context, not written to the file
+            'values': values,
+            # column -> original value, for the cells this tool changes
+            'changed': {col: original.get(col, '') for col in loaded['fieldnames'] if values.get(col) != original.get(col)},
         })
     return rows, updates
 
@@ -309,8 +330,9 @@ def api_final():
     sdata = get_session()
     if 'reasoned_results' not in sdata:
         abort(400, description="Preview reasons first.")
-    rows, _ = build_final_rows(sdata['reasoned_results'])
-    return jsonify({'rows': rows})
+    loaded = sdata['destination']
+    rows, _ = build_final_rows(loaded, sdata['reasoned_results'])
+    return jsonify({'columns': loaded['fieldnames'], 'headers': loaded['headers'], 'rows': rows})
 
 
 @app.route('/api/export', methods=['POST'])
@@ -319,7 +341,7 @@ def api_export():
     if 'reasoned_results' not in sdata:
         abort(400, description="Preview reasons before exporting.")
     loaded = sdata['destination']
-    rows, updates = build_final_rows(sdata['reasoned_results'])
+    rows, updates = build_final_rows(loaded, sdata['reasoned_results'])
 
     # The page sends the row indices it is currently showing (after any filters), so the
     # file holds exactly the rows on screen. No body = every row.

@@ -498,6 +498,7 @@ function renderMatchTableRows(results) {
       <td>${r.index + 1}</td>
       <td>${escapeHtml(r.workgroup)}</td>
       <td>${escapeHtml(r.weekday || '')}</td>
+      <td>${escapeHtml(r.date || '')}</td>
       <td>${escapeHtml(r.start_time)}</td>
       <td>${escapeHtml(r.end_time)}</td>
       <td>${escapeHtml(r.old_headcount)}</td>
@@ -509,65 +510,302 @@ function renderMatchTableRows(results) {
   el('match-table-wrap').classList.remove('hidden');
 }
 
-function populateFilterOptions() {
-  const workgroups = [...new Set(state.allResults.map(r => r.workgroup))].sort();
-  const days = WEEKDAY_OPTIONS.filter(d => state.allResults.some(r => r.weekday === d));
-  const wgSelect = el('filter-workgroup');
-  const daySelect = el('filter-day');
-  const prevWg = wgSelect.value, prevDay = daySelect.value;
-  wgSelect.innerHTML = '<option value="">All workgroups</option>' +
-    workgroups.map(w => `<option value="${escapeAttr(w)}">${escapeHtml(w)}</option>`).join('');
-  daySelect.innerHTML = '<option value="">All days</option>' +
-    days.map(d => `<option value="${d}">${d}</option>`).join('');
-  if (workgroups.includes(prevWg)) wgSelect.value = prevWg;
-  if (days.includes(prevDay)) daySelect.value = prevDay;
+// ---- filters shared by the Match table and the final result ----
+// Both tables filter on the same things: workgroup (each workgroup on its own - combined
+// labels like "Pack - Batch, Sort" are split), day, date, and start/end time (24-hour).
+// `prefix` is the id prefix of the filter bar: 'filter' (Match) or 'final-filter' (final result).
+
+const COMMON_FILTERS = ['workgroup', 'day', 'date', 'start', 'end'];
+
+function rowWorkgroups(r) {
+  if (r.workgroups && r.workgroups.length) return r.workgroups;
+  return r.workgroup ? [r.workgroup] : [];
 }
 
-function applyFiltersAndRender() {
-  const wg = el('filter-workgroup').value;
-  const day = el('filter-day').value;
-  const conf = el('filter-confidence').value;
-  const search = el('filter-search').value.trim().toLowerCase();
-  const filtered = state.allResults.filter(r => {
-    if (wg && r.workgroup !== wg) return false;
-    if (day && r.weekday !== day) return false;
-    if (conf && r.confidence !== conf) return false;
-    if (search) {
-      const haystack = `${r.workgroup} ${r.matched_shift_name || ''} ${r.reason || ''}`.toLowerCase();
-      if (!haystack.includes(search)) return false;
+function fillSelect(id, allLabel, options) {
+  const select = el(id);
+  const previous = select.value;
+  select.innerHTML = `<option value="">${allLabel}</option>` +
+    options.map(([value, label]) => `<option value="${escapeAttr(value)}">${escapeHtml(label)}</option>`).join('');
+  if (options.some(([value]) => value === previous)) select.value = previous;
+}
+
+function populateCommonFilters(prefix, rows) {
+  const byLower = new Map();
+  rows.forEach(r => rowWorkgroups(r).forEach(w => { if (!byLower.has(w.toLowerCase())) byLower.set(w.toLowerCase(), w); }));
+  const workgroups = [...byLower.values()].sort((a, b) => a.localeCompare(b));
+  const days = WEEKDAY_OPTIONS.filter(d => rows.some(r => r.weekday === d));
+  const weekdayOfDate = {};
+  rows.forEach(r => { if (r.date) weekdayOfDate[r.date] = r.weekday || ''; });
+  const dates = Object.keys(weekdayOfDate).sort();
+  const distinctSorted = key => [...new Set(rows.map(r => r[key]).filter(Boolean))].sort();   // 'HH:MM' sorts correctly
+
+  fillSelect(`${prefix}-workgroup`, 'All workgroups', workgroups.map(w => [w, w]));
+  fillSelect(`${prefix}-day`, 'All days', days.map(d => [d, d]));
+  fillSelect(`${prefix}-date`, 'All dates',
+    dates.map(d => [d, weekdayOfDate[d] ? `${d} (${weekdayOfDate[d].slice(0, 3)})` : d]));
+  fillSelect(`${prefix}-start`, 'Any start (24h)', distinctSorted('start_time').map(t => [t, t]));
+  fillSelect(`${prefix}-end`, 'Any end (24h)', distinctSorted('end_time').map(t => [t, t]));
+}
+
+function matchesCommonFilters(prefix, r) {
+  const value = name => el(`${prefix}-${name}`).value;
+  const wg = value('workgroup').toLowerCase();
+  if (wg && !rowWorkgroups(r).some(w => w.toLowerCase() === wg)) return false;
+  if (value('day') && r.weekday !== value('day')) return false;
+  if (value('date') && r.date !== value('date')) return false;
+  if (value('start') && r.start_time !== value('start')) return false;
+  if (value('end') && r.end_time !== value('end')) return false;
+  return true;
+}
+
+function resetCommonFilters(prefix) {
+  COMMON_FILTERS.forEach(name => { el(`${prefix}-${name}`).value = ''; });
+}
+
+// ---- Excel-style column filters ----
+// Every column of a review table gets a filter button in its header. It opens a searchable list
+// of the distinct values in that column (with counts) to tick, like Excel's AutoFilter. Filters on
+// several columns combine (AND), and a column's list only offers values still possible under the
+// other filters. The columns come from the loaded file, so whatever it contains can be filtered.
+//
+//   getRows()             all rows of the table
+//   getColumns()          [{key, label, value(row) -> string, title?}] currently shown columns
+//   passesOtherFilters(r) the table's other (non-column) filters, so lists stay in step with them
+//   onChange()            called after a filter is applied or cleared
+
+const BLANK_LABEL = '(Blanks)';
+const FILTER_LIST_LIMIT = 500;
+
+function sortFilterValues(values) {
+  const blanks = values.filter(v => v === '');
+  const rest = values.filter(v => v !== '');
+  const numeric = rest.length > 0 && rest.every(v => /^-?\d+(\.\d+)?$/.test(v));
+  rest.sort(numeric
+    ? (a, b) => parseFloat(a) - parseFloat(b)
+    : (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+  return [...rest, ...blanks];
+}
+
+function createColumnFilters({ getRows, getColumns, passesOtherFilters, onChange }) {
+  const selected = new Map();   // column key -> Set of values to keep
+  let popup = null;
+
+  function matches(row, exceptKey) {
+    for (const col of getColumns()) {
+      if (col.key === exceptKey) continue;
+      const keep = selected.get(col.key);
+      if (keep && !keep.has(col.value(row))) return false;
     }
     return true;
-  });
+  }
+
+  function onOutsideClick(e) {
+    if (popup && !popup.contains(e.target) && !e.target.closest('.col-filter-btn')) closePopup();
+  }
+  function onKey(e) { if (e.key === 'Escape') closePopup(); }
+  function onScroll(e) { if (popup && !popup.contains(e.target)) closePopup(); }
+
+  function closePopup() {
+    if (!popup) return;
+    popup.remove();
+    popup = null;
+    document.removeEventListener('mousedown', onOutsideClick, true);
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('scroll', onScroll, true);
+    window.removeEventListener('resize', closePopup);
+  }
+
+  function openPopup(key, btn) {
+    const col = getColumns().find(c => c.key === key);
+    if (!col) return;
+    const counts = new Map();
+    getRows().filter(r => passesOtherFilters(r) && matches(r, key)).forEach(r => {
+      const v = col.value(r);
+      counts.set(v, (counts.get(v) || 0) + 1);
+    });
+    const values = sortFilterValues([...counts.keys()]);
+    const index = new Map(values.map((v, i) => [v, i]));
+    const current = selected.get(key);
+    const draft = new Set(current ? values.filter(v => current.has(v)) : values);
+
+    popup = document.createElement('div');
+    popup.className = 'col-filter-popup';
+    popup.dataset.col = key;
+    popup.setAttribute('role', 'dialog');
+    popup.setAttribute('aria-label', `Filter ${col.label}`);
+    popup.innerHTML = `
+      <div class="cf-title">${escapeHtml(col.label)}</div>
+      <input type="text" class="cf-search" placeholder="Search" aria-label="Search values">
+      <label class="cf-row cf-all"><input type="checkbox" class="cf-all-box"> <span>(Select all)</span></label>
+      <div class="cf-list"></div>
+      <div class="cf-actions">
+        <button type="button" class="secondary small cf-clear">Clear filter</button>
+        <span class="cf-spacer"></span>
+        <button type="button" class="secondary small cf-cancel">Cancel</button>
+        <button type="button" class="primary small cf-ok">OK</button>
+      </div>`;
+    document.body.appendChild(popup);
+    const listEl = popup.querySelector('.cf-list');
+    const searchEl = popup.querySelector('.cf-search');
+    const allBox = popup.querySelector('.cf-all-box');
+    const okBtn = popup.querySelector('.cf-ok');
+
+    const labelOf = v => (v === '' ? BLANK_LABEL : v);
+    const visibleValues = () => {
+      const q = searchEl.value.trim().toLowerCase();
+      return q ? values.filter(v => labelOf(v).toLowerCase().includes(q)) : values;
+    };
+    function syncControls() {
+      const visible = visibleValues();
+      const ticked = visible.filter(v => draft.has(v)).length;
+      allBox.checked = visible.length > 0 && ticked === visible.length;
+      allBox.indeterminate = ticked > 0 && ticked < visible.length;
+      okBtn.disabled = draft.size === 0;
+    }
+    function renderList() {
+      const visible = visibleValues();
+      listEl.innerHTML = visible.slice(0, FILTER_LIST_LIMIT).map(v => `
+        <label class="cf-row"><input type="checkbox" data-i="${index.get(v)}"${draft.has(v) ? ' checked' : ''}>
+          <span class="cf-val">${escapeHtml(labelOf(v))}</span><span class="cf-count">${counts.get(v)}</span></label>`).join('') +
+        (visible.length > FILTER_LIST_LIMIT ? `<div class="cf-note">Showing the first ${FILTER_LIST_LIMIT} of ${visible.length} - type to narrow the list.</div>` : '') +
+        (visible.length === 0 ? '<div class="cf-note">No matching values.</div>' : '');
+      syncControls();
+    }
+
+    listEl.addEventListener('change', e => {
+      const box = e.target.closest('input[data-i]');
+      if (!box) return;
+      const v = values[Number(box.dataset.i)];
+      if (box.checked) draft.add(v); else draft.delete(v);
+      syncControls();
+    });
+    searchEl.addEventListener('input', renderList);
+    allBox.addEventListener('change', () => {
+      visibleValues().forEach(v => { if (allBox.checked) draft.add(v); else draft.delete(v); });
+      renderList();
+    });
+    popup.querySelector('.cf-cancel').addEventListener('click', closePopup);
+    popup.querySelector('.cf-clear').addEventListener('click', () => { selected.delete(key); closePopup(); onChange(); });
+    okBtn.addEventListener('click', () => {
+      if (values.every(v => draft.has(v))) {
+        selected.delete(key);                                   // everything ticked = no filter
+      } else {
+        const keep = new Set(draft);
+        if (current) current.forEach(v => { if (!counts.has(v)) keep.add(v); });   // values other filters hide right now
+        selected.set(key, keep);
+      }
+      closePopup();
+      onChange();
+    });
+
+    renderList();
+    // Fixed position so the table's own scrolling can't clip it; clamp to the viewport.
+    const rect = btn.getBoundingClientRect();
+    const width = 270;
+    popup.style.width = `${width}px`;
+    popup.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+    popup.style.top = `${rect.bottom + 4}px`;
+    popup.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - popup.offsetHeight - 8))}px`;
+    document.addEventListener('mousedown', onOutsideClick, true);
+    document.addEventListener('keydown', onKey, true);
+    document.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', closePopup);
+    searchEl.focus();
+  }
+
+  return {
+    matches: row => matches(row),
+    clear() { selected.clear(); closePopup(); },
+    close: closePopup,
+    activeCount: () => getColumns().filter(c => selected.has(c.key)).length,
+    headerCell(col, extraClass) {
+      const on = selected.has(col.key);
+      return `<th${extraClass ? ` class="${extraClass}"` : ''}${col.title ? ` title="${escapeAttr(col.title)}"` : ''}>${escapeHtml(col.label)}` +
+        `<button type="button" class="col-filter-btn${on ? ' is-active' : ''}" data-col="${escapeAttr(col.key)}" ` +
+        `title="${on ? 'Filtered - click to change' : 'Filter this column'}" aria-label="Filter ${escapeAttr(col.label)}">&#9662;</button></th>`;
+    },
+    bind(thead) {
+      thead.addEventListener('click', e => {
+        const btn = e.target.closest('.col-filter-btn');
+        if (!btn) return;
+        if (popup && popup.dataset.col === btn.dataset.col) { closePopup(); return; }
+        closePopup();
+        openPopup(btn.dataset.col, btn);
+      });
+    },
+  };
+}
+
+// ---- Match table filters ----
+
+// One entry per column of the Match table (same order as the cells in renderMatchTableRows).
+const MATCH_COLUMNS = [
+  { key: 'index', label: '#', value: r => String(r.index + 1) },
+  { key: 'workgroup', label: 'Workgroup', value: r => r.workgroup },
+  { key: 'weekday', label: 'Day', value: r => r.weekday || '' },
+  { key: 'date', label: 'Date', value: r => r.date || '' },
+  { key: 'start', label: 'Start', value: r => r.start_time },
+  { key: 'end', label: 'End', value: r => r.end_time },
+  { key: 'old', label: 'Old Headcount', value: r => String(r.old_headcount) },
+  { key: 'new', label: 'New Headcount', value: r => (r.new_headcount === null || r.new_headcount === undefined ? '—' : String(r.new_headcount)) },
+  { key: 'confidence', label: 'Confidence', value: r => confidenceLabel(r.confidence) },
+  { key: 'reason', label: 'Reason', value: r => r.reason || '' },
+];
+
+// The filter bar above the table (everything except the per-column filters).
+function passesMatchBarFilters(r) {
+  if (!matchesCommonFilters('filter', r)) return false;
+  const conf = el('filter-confidence').value;
+  if (conf && r.confidence !== conf) return false;
+  const search = el('filter-search').value.trim().toLowerCase();
+  if (search) {
+    const haystack = `${r.workgroup} ${r.matched_shift_name || ''} ${r.reason || ''} ${r.date || ''} ${r.start_time} ${r.end_time}`.toLowerCase();
+    if (!haystack.includes(search)) return false;
+  }
+  return true;
+}
+
+const matchColumnFilters = createColumnFilters({
+  getRows: () => state.allResults,
+  getColumns: () => MATCH_COLUMNS,
+  passesOtherFilters: passesMatchBarFilters,
+  onChange: () => applyFiltersAndRender(),
+});
+matchColumnFilters.bind(document.querySelector('#match-table thead'));
+
+function applyFiltersAndRender() {
+  const filtered = state.allResults.filter(r => passesMatchBarFilters(r) && matchColumnFilters.matches(r));
+  document.querySelector('#match-table thead').innerHTML =
+    '<tr>' + MATCH_COLUMNS.map(col => matchColumnFilters.headerCell(col)).join('') + '</tr>';
   renderMatchTableRows(filtered);
   const total = state.allResults.length;
-  el('filter-count').textContent = filtered.length === total
-    ? `${total} row(s)`
-    : `Showing ${filtered.length} of ${total} row(s)`;
+  const columnsOn = matchColumnFilters.activeCount();
+  el('filter-count').textContent = (filtered.length === total ? `${total} row(s)` : `Showing ${filtered.length} of ${total} row(s)`) +
+    (columnsOn ? ` · ${columnsOn} column filter(s) on` : '');
 }
 
 function setResultsAndRender(results, resetFilters) {
   state.allResults = results.map((r, i) => ({ ...r, index: r.index !== undefined ? r.index : i }));
+  populateCommonFilters('filter', state.allResults);
   if (resetFilters) {
-    populateFilterOptions();
-    el('filter-workgroup').value = '';
-    el('filter-day').value = '';
+    resetCommonFilters('filter');
     el('filter-confidence').value = '';
     el('filter-search').value = '';
-  } else {
-    populateFilterOptions();
+    matchColumnFilters.clear();
   }
   applyFiltersAndRender();
 }
 
-['filter-workgroup', 'filter-day', 'filter-confidence'].forEach(id => {
+[...COMMON_FILTERS.map(name => `filter-${name}`), 'filter-confidence'].forEach(id => {
   el(id).addEventListener('change', applyFiltersAndRender);
 });
 el('filter-search').addEventListener('input', applyFiltersAndRender);
 el('filter-reset-btn').addEventListener('click', () => {
-  el('filter-workgroup').value = '';
-  el('filter-day').value = '';
+  resetCommonFilters('filter');
   el('filter-confidence').value = '';
   el('filter-search').value = '';
+  matchColumnFilters.clear();
   applyFiltersAndRender();
 });
 
@@ -625,51 +863,73 @@ el('reason-preview-btn').addEventListener('click', async () => {
 // Final rows exactly as the server will write them (GET /api/final), and the subset left
 // after the filters below. The download contains the visible rows and nothing else.
 let finalRows = [];
+let finalColumns = [];    // every column of the output file, in file order
+let finalHeaders = {};    // names of the Headcount / Reason columns
 let finalVisible = [];
 
-function populateFinalFilterOptions() {
-  const workgroups = [...new Set(finalRows.map(r => r.workgroup))].sort();
-  const days = WEEKDAY_OPTIONS.filter(d => finalRows.some(r => r.weekday === d));
-  el('final-filter-workgroup').innerHTML = '<option value="">All workgroups</option>' +
-    workgroups.map(w => `<option value="${escapeAttr(w)}">${escapeHtml(w)}</option>`).join('');
-  el('final-filter-day').innerHTML = '<option value="">All days</option>' +
-    days.map(d => `<option value="${d}">${d}</option>`).join('');
-  el('final-filter-status').value = '';
-  el('final-filter-search').value = '';
+// Columns to show: all of them, or (if ticked) only those with something in at least one row.
+// Headcount and Reason always stay - they are the two columns this tool writes.
+function finalShownColumns() {
+  if (!el('final-hide-empty').checked) return finalColumns;
+  return finalColumns.filter(col =>
+    col === finalHeaders.headcount || col === finalHeaders.reason ||
+    finalRows.some(r => r.values[col] !== ''));
+}
+
+// Review-only columns (not written to the file) followed by every column of the output file.
+// Column keys are prefixed so a file column can never collide with a review-only one.
+function finalColumnDefs() {
+  return [
+    { key: 'meta:row', label: '#', meta: true, title: 'Row number in the file (review only)', value: r => String(r.index + 1) },
+    { key: 'meta:match', label: 'Match', meta: true, title: 'How this row matched the source (review only, not written to the file)', value: r => confidenceLabel(r.confidence) },
+    { key: 'meta:shift', label: 'Source shift', meta: true, title: 'Source shift it matched (review only, not written to the file)', value: r => r.matched_shift_name || '' },
+    ...finalShownColumns().map(col => ({ key: `file:${col}`, label: col, file: col, value: r => r.values[col] ?? '' })),
+  ];
+}
+
+// The filter bar above the table (everything except the per-column filters).
+function passesFinalBarFilters(r) {
+  if (!matchesCommonFilters('final-filter', r)) return false;
+  const status = el('final-filter-status').value;
+  if (status === 'updated' && !r.updated) return false;
+  if (status === 'unchanged' && r.updated) return false;
+  const search = el('final-filter-search').value.trim().toLowerCase();
+  if (search && !Object.values(r.values).join(' ').toLowerCase().includes(search)) return false;
+  return true;
+}
+
+const finalColumnFilters = createColumnFilters({
+  getRows: () => finalRows,
+  getColumns: finalColumnDefs,
+  passesOtherFilters: passesFinalBarFilters,
+  onChange: () => renderFinalTable(),
+});
+finalColumnFilters.bind(document.querySelector('#export-preview-table thead'));
+
+function finalRowHtml(r, defs) {
+  return `<tr class="${r.updated ? '' : 'row-failed'}">` + defs.map(def => {
+    if (def.key === 'meta:row') return `<td class="meta-col">${r.index + 1}</td>`;
+    if (def.key === 'meta:match') return `<td class="meta-col"><span class="badge ${r.confidence}">${confidenceLabel(r.confidence)}</span></td>`;
+    if (def.key === 'meta:shift') return `<td class="meta-col">${escapeHtml(r.matched_shift_name || '')}</td>`;
+    const changed = Object.prototype.hasOwnProperty.call(r.changed, def.file);
+    const title = changed ? ` title="Was: ${escapeAttr(r.changed[def.file] === '' ? '(blank)' : r.changed[def.file])}"` : '';
+    return `<td class="${changed ? 'cell-changed' : ''}"${title}>${escapeHtml(def.value(r))}</td>`;
+  }).join('') + '</tr>';
 }
 
 function renderFinalTable() {
-  const wg = el('final-filter-workgroup').value;
-  const day = el('final-filter-day').value;
-  const status = el('final-filter-status').value;
-  const search = el('final-filter-search').value.trim().toLowerCase();
-  finalVisible = finalRows.filter(r => {
-    if (wg && r.workgroup !== wg) return false;
-    if (day && r.weekday !== day) return false;
-    if (status === 'updated' && !r.updated) return false;
-    if (status === 'unchanged' && r.updated) return false;
-    if (search) {
-      const haystack = `${r.workgroup} ${r.weekday || ''} ${r.start_time} ${r.end_time} ${r.reason}`.toLowerCase();
-      if (!haystack.includes(search)) return false;
-    }
-    return true;
-  });
+  finalVisible = finalRows.filter(r => passesFinalBarFilters(r) && finalColumnFilters.matches(r));
 
-  document.querySelector('#export-preview-table tbody').innerHTML = finalVisible.map(r => `
-    <tr class="${r.updated ? '' : 'row-failed'}">
-      <td>${r.index + 1}</td>
-      <td>${escapeHtml(r.workgroup)}</td>
-      <td>${escapeHtml(r.weekday || '')}</td>
-      <td>${escapeHtml(r.start_time)}</td>
-      <td>${escapeHtml(r.end_time)}</td>
-      <td>${escapeHtml(r.headcount)}${r.updated ? '' : ' <small>(unchanged — no source match)</small>'}</td>
-      <td>${escapeHtml(r.reason)}</td>
-    </tr>
-  `).join('');
+  const defs = finalColumnDefs();
+  document.querySelector('#export-preview-table thead').innerHTML =
+    '<tr>' + defs.map(def => finalColumnFilters.headerCell(def, def.meta ? 'meta-col' : '')).join('') + '</tr>';
+  document.querySelector('#export-preview-table tbody').innerHTML = finalVisible.map(r => finalRowHtml(r, defs)).join('');
 
   const shown = finalVisible.length, total = finalRows.length;
   const filtered = shown < total;
-  el('final-filter-count').textContent = filtered ? `Showing ${shown} of ${total} row(s)` : `${total} row(s)`;
+  const columnsOn = finalColumnFilters.activeCount();
+  el('final-filter-count').textContent = (filtered ? `Showing ${shown} of ${total} row(s)` : `${total} row(s)`) +
+    (columnsOn ? ` · ${columnsOn} column filter(s) on` : '');
   el('export-confirm-note').textContent = filtered
     ? `Filters are on: the downloaded file will contain only these ${shown} of ${total} rows.`
     : `This is exactly what will be written to the file (all ${total} rows). Check it, then confirm below.`;
@@ -677,19 +937,20 @@ function renderFinalTable() {
   el('export-confirm-btn').disabled = shown === 0;
 }
 
-['final-filter-workgroup', 'final-filter-day', 'final-filter-status'].forEach(id => {
+[...COMMON_FILTERS.map(name => `final-filter-${name}`), 'final-filter-status', 'final-hide-empty'].forEach(id => {
   el(id).addEventListener('change', renderFinalTable);
 });
 el('final-filter-search').addEventListener('input', renderFinalTable);
 el('final-filter-reset-btn').addEventListener('click', () => {
-  el('final-filter-workgroup').value = '';
-  el('final-filter-day').value = '';
+  resetCommonFilters('final-filter');
   el('final-filter-status').value = '';
   el('final-filter-search').value = '';
+  finalColumnFilters.clear();
   renderFinalTable();
 });
 
 function hideFinalResult() {
+  finalColumnFilters.close();
   el('export-review-wrap').classList.add('hidden');
   setStatus(el('export-status'), '', '');
   state.exportDone = false;
@@ -699,13 +960,20 @@ el('export-review-btn').addEventListener('click', async () => {
   el('export-review-btn').disabled = true;
   try {
     await previewReasons();
-    finalRows = (await api('/api/final')).rows;
+    const final = await api('/api/final');
+    finalRows = final.rows;
+    finalColumns = final.columns;
+    finalHeaders = final.headers;
     const total = finalRows.length;
     const unmatched = finalRows.filter(r => !r.updated).length;
     el('export-review-text').textContent =
       `${total} row(s) total — ${total - unmatched} will get an updated Headcount` +
-      (unmatched ? `, ${unmatched} have no source match and will keep their original Headcount (flagged below).` : '.');
-    populateFinalFilterOptions();
+      (unmatched ? `, ${unmatched} have no source match and keep their original Headcount (highlighted red below).` : '.');
+    populateCommonFilters('final-filter', finalRows);
+    resetCommonFilters('final-filter');
+    el('final-filter-status').value = '';
+    el('final-filter-search').value = '';
+    finalColumnFilters.clear();
     renderFinalTable();
     el('export-review-wrap').classList.remove('hidden');
     setStatus(el('export-status'), '', '');

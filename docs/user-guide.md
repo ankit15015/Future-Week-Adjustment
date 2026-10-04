@@ -68,7 +68,7 @@ Press **Run match**. Each destination row is matched to the source by:
 | No source match | No source row for that weekday + workgroup; the original Headcount is kept |
 | No time | The row has no readable start date-time |
 
-Use the filters (workgroup, day, confidence, search) to review.
+See [Filtering](#filtering-both-tables) below for the filters on this table.
 
 ## 7. Reason
 
@@ -76,14 +76,50 @@ Group reasons by **Workgroup** or by **Shift type** (start-end time), type a rea
 optionally a default for anything not covered. A row with no reason keeps whatever was already in
 its Reason cell. **Preview reasons in table above** applies them to the match table.
 
+## Filtering (both tables)
+
+The **Match** table and the **final result** filter the same way, and both adapt to whatever is
+in the loaded file.
+
+**Column filters (like Excel's AutoFilter).** Every column header has a filter button (▾). Click
+it to see the distinct values in that column with how many rows have each, search them, tick the
+ones to keep, and press **OK**. The button turns amber while a column is filtered.
+
+- Filters on several columns combine (AND).
+- Each column's list only offers values that are still possible under the other filters, so the
+  counts always match what you would get.
+- **Clear filter** removes one column's filter; **Reset filters** removes everything.
+- This works on every column, including all the file's own columns in the final result.
+
+**Quick filters above the table.** Shortcuts for things a plain column list can't do:
+
+| Filter | Notes |
+| --- | --- |
+| Workgroup | Lists each workgroup on its own. A combined label such as `Pack - Batch, Pack - Flow, Sort` is split, and picking `Sort` shows every row whose workgroup includes it. |
+| Day, Date | Date is the shift's start date. |
+| Start, End | **24-hour** times (`06:45`, `23:00`), listing only the times present in the file. |
+| Confidence (Match) / status (final) | Matched vs no source match. |
+| Search | Matches any text in the row. |
+
+Quick filters and column filters work together. In the final result, **whatever is left on screen
+is exactly what gets downloaded.**
+
 ## 8. Apply & download
 
-Press **Show final result**. The table lists every row exactly as it will appear in the file
-(Headcount and Reason). Rows with no source match are highlighted and keep their original
-Headcount.
+Press **Show final result**. The table shows **every column of the output file**, exactly as it
+will be written, so you can check all the details before downloading.
 
-**Filters** - workgroup, day, status (updated / unchanged) and a search box. The note under the
-table says how many rows will be downloaded.
+- **Yellow cells** are the values this tool changed (Headcount and Reason). Hover one to see
+  what it was before.
+- **Red rows** had no source match and keep their original Headcount.
+- The three italic columns on the left (`#`, `Match`, `Source shift`) are for review only and are
+  **not** in the file.
+- Headcounts are whole numbers (`9`, not `9.0`), the same on screen and in the file.
+- **Hide columns that are empty in every row** tidies up files with many unused columns. The
+  columns are always the file's own, so a file with more or fewer columns just shows more or fewer.
+
+The filters are described in [Filtering](#filtering-both-tables) below. The note under the table
+says how many rows will be downloaded.
 
 - No filter: the file contains **all** rows.
 - Filter on: the file contains **only the rows shown**, and is named `... - Updated (filtered).csv`.

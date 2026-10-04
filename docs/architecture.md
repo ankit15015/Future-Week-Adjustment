@@ -43,12 +43,16 @@ run **one worker** (`gunicorn -w 1`, already set in `render.yaml`).
 
 ## The final result and the downloaded file
 
-`build_final_rows(results)` in `app.py` is the **single definition** of what each row holds in the
-output. Both `GET /api/final` (the on-screen table) and `POST /api/export` (the file) use it, so
-they cannot drift apart:
+`build_final_rows(loaded, results)` in `app.py` is the **single definition** of what each row holds
+in the output. Both `GET /api/final` (the on-screen table) and `POST /api/export` (the file) use
+it, and it builds each row's `values` with `opportunities.output_values` - the same function the
+CSV writer uses - so they cannot drift apart:
 
-- Headcount = the source value, or the original value if there was no source match.
+- Headcount = the source value, or the original value if there was no source match. Whole numbers
+  are written as integers (`9`, not `9.0`) via `opportunities.clean_headcount`.
 - Reason = the typed reason, or the original Reason cell if none was given.
+- Every other column is the original cell, untouched. All columns are sent to the page, so the
+  review table shows the whole file.
 
 `POST /api/export` accepts `{"indices": [...]}` - the row indices currently shown after filtering.
 Only those rows are written. Omitting the body writes every row.
@@ -72,7 +76,7 @@ All API errors return JSON `{"description": "..."}` with the HTTP status; the UI
 | `POST /api/destination` | Load the Opportunities file | 400 until minimum hours are confirmed and the 1% rule passes |
 | `POST /api/match` | Match every destination row | |
 | `POST /api/reasons/preview` | Apply reasons | Body `{group_by, reason_map, default_reason}` |
-| `GET /api/final` | Final rows exactly as they will be written | Requires a reasons preview |
+| `GET /api/final` | Final rows exactly as they will be written | Requires a reasons preview. Returns `columns` (every output column, file order), `headers` (detected Headcount/Reason/... column names) and `rows`. Each row has `values` (column -> text as written), `changed` (column -> original value, only for cells this tool changed), plus `index`, `workgroup`, `workgroups`, `weekday`, `date`, `start_time`, `end_time`, `updated`, `confidence`, `matched_shift_name` |
 | `POST /api/export` | Write the file | Body `{indices?: number[]}`; returns `download_url`, `rows_written`, `rows_total`, `rows_unmatched`, `filtered` |
 | `GET /api/download/<file>` | Download a generated file | Served from `instance/output/` |
 
@@ -93,6 +97,18 @@ All API errors return JSON `{"description": "..."}` with the HTTP status; the UI
 
 No framework or build step. `static/js/app.js` is organised in sections (state and step rail,
 file lists, source, minimum hours / 1% rule, destination, match, reasons, export, mode select).
+
+Filtering is shared by the two review tables (Match and final result):
+
+- `createColumnFilters(...)` is a reusable Excel-style AutoFilter: a button per column header that
+  opens a searchable checklist of that column's distinct values (with counts), cascading with the
+  other filters. A table supplies `getRows`, `getColumns` (key, label, `value(row)`),
+  `passesOtherFilters` and `onChange`. The final result builds its columns from the loaded file,
+  so any column set works.
+- `populateCommonFilters` / `matchesCommonFilters` drive the quick filters above each table
+  (individual workgroups via `split_workgroups`, day, date, 24-hour start/end).
+- The final result downloads exactly the rows left after all filters: the page sends their `index`
+  values to `POST /api/export`.
 Screens (`mode-select`, `mode-gate`, `cap-notice`, `standard-mode`) are shown/hidden with a
 `hidden` class. After editing a template, restart the server (templates are cached when
 `debug=False`) and hard-refresh the browser for static files.

@@ -177,8 +177,11 @@
       <div id="match-summary" class="summary-chips"></div>
       <div id="match-table-wrap" class="table-wrap hidden">
         <div class="filter-bar">
-          <select id="filter-workgroup"><option value="">All workgroups</option></select>
-          <select id="filter-day"><option value="">All days</option></select>
+          <select id="filter-workgroup" title="Workgroup (combined labels are split)"><option value="">All workgroups</option></select>
+          <select id="filter-day" title="Day of week"><option value="">All days</option></select>
+          <select id="filter-date" title="Date"><option value="">All dates</option></select>
+          <select id="filter-start" title="Start time, 24-hour"><option value="">Any start (24h)</option></select>
+          <select id="filter-end" title="End time, 24-hour"><option value="">Any end (24h)</option></select>
           <select id="filter-confidence">
             <option value="">All confidence levels</option>
             <option value="exact">Exact</option>
@@ -191,15 +194,12 @@
           <button id="filter-reset-btn" class="secondary small">Reset filters</button>
           <span id="filter-count" class="filter-count"></span>
         </div>
-        <table id="match-table">
-          <thead>
-            <tr>
-              <th>#</th><th>Workgroup</th><th>Day</th><th>Start</th><th>End</th>
-              <th>Old Headcount</th><th>New Headcount</th><th>Confidence</th><th>Reason</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+        <div class="table-scroll">
+          <table id="match-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
@@ -224,22 +224,27 @@
       <div id="export-review-wrap" class="hidden">
         <p class="summary-line" id="export-review-text"></p>
         <div class="filter-bar">
-          <select id="final-filter-workgroup"><option value="">All workgroups</option></select>
-          <select id="final-filter-day"><option value="">All days</option></select>
+          <select id="final-filter-workgroup" title="Workgroup (combined labels are split)"><option value="">All workgroups</option></select>
+          <select id="final-filter-day" title="Day of week"><option value="">All days</option></select>
+          <select id="final-filter-date" title="Date"><option value="">All dates</option></select>
+          <select id="final-filter-start" title="Start time, 24-hour"><option value="">Any start (24h)</option></select>
+          <select id="final-filter-end" title="End time, 24-hour"><option value="">Any end (24h)</option></select>
           <select id="final-filter-status">
             <option value="">All rows</option>
-            <option value="updated">Updated headcount</option>
-            <option value="unchanged">Unchanged (no source match)</option>
+            <option value="updated">Matched to source</option>
+            <option value="unchanged">No source match (kept as is)</option>
           </select>
-          <input type="text" id="final-filter-search" placeholder="Search workgroup, time, or reason&hellip;">
+          <input type="text" id="final-filter-search" placeholder="Search any column&hellip;">
           <button id="final-filter-reset-btn" class="secondary small">Reset filters</button>
           <span id="final-filter-count" class="filter-count"></span>
         </div>
-        <div class="table-wrap">
-          <table id="export-preview-table">
-            <thead>
-              <tr><th>#</th><th>Workgroup</th><th>Day</th><th>Start</th><th>End</th><th>New Headcount</th><th>Reason</th></tr>
-            </thead>
+        <div class="final-options">
+          <label><input type="checkbox" id="final-hide-empty"> Hide columns that are empty in every row</label>
+          <span class="final-legend"><span class="legend-swatch"></span> value changed by this tool &nbsp;&middot;&nbsp; <em>italic</em> columns are for review only and are not written to the file</span>
+        </div>
+        <div class="table-wrap table-scroll">
+          <table id="export-preview-table" class="wide-table">
+            <thead></thead>
             <tbody></tbody>
           </table>
         </div>

@@ -11,6 +11,13 @@ def test_normalize_workgroup_ignores_case_spacing_and_order():
         base_layer.normalize_workgroup("sort,  pack - flow ,Pack - Batch")
 
 
+def test_split_workgroups_lists_each_workgroup_once_in_original_order():
+    assert base_layer.split_workgroups("Pack - Batch, Pack - Flow,  Sort") == ["Pack - Batch", "Pack - Flow", "Sort"]
+    assert base_layer.split_workgroups("Pick") == ["Pick"]
+    assert base_layer.split_workgroups("") == []
+    assert base_layer.split_workgroups("Prep,Receive,") == ["Prep", "Receive"]
+
+
 @pytest.mark.parametrize("raw, expected", [
     ("Sunday", "Sunday"), (" mon ", "Monday"), ("TUES", "Tuesday"), ("xyz", None), (None, None),
 ])

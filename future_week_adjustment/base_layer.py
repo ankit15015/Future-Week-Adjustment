@@ -41,6 +41,14 @@ def normalize_workgroup(s):
     return ','.join(parts)
 
 
+def split_workgroups(s):
+    """
+    Individual workgroup names from a combined label, in their original order and spelling:
+    "Pack - Batch, Pack - Flow, Sort" -> ["Pack - Batch", "Pack - Flow", "Sort"].
+    """
+    return [re.sub(r'\s+', ' ', p.strip()) for p in str(s).split(',') if p.strip()]
+
+
 def to_time(value):
     """Normalize a cell value (Excel time float, datetime.time, or 'HH:MM' string) to datetime.time."""
     if value is None or value == '':

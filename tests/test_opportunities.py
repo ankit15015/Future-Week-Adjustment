@@ -16,7 +16,33 @@ def test_load_csv_detects_columns_by_header_name(tmp_path):
     first = loaded["rows"][0]
     assert (first["workgroup"], first["weekday"], first["old_headcount"], first["old_reason"]) \
         == ("Inbound", "Sunday", "1", "old reason A")
+    assert first["start_dt"].date().isoformat() == "2026-09-27"
     assert first["start_time"].strftime("%H:%M") == "06:00"
+
+
+def test_format_cell_matches_how_cells_are_written():
+    import datetime as dt
+    assert opportunities.format_cell(None) == ""
+    assert opportunities.format_cell(9.0) == "9"
+    assert opportunities.format_cell(9.5) == "9.5"
+    assert opportunities.format_cell(7) == "7"
+    assert opportunities.format_cell("text") == "text"
+    assert opportunities.format_cell(dt.datetime(2026, 9, 28, 6, 5)) == "2026-09-28T06:05"
+
+
+def test_clean_headcount_turns_whole_floats_into_ints():
+    assert opportunities.clean_headcount(10.0) == 10 and isinstance(opportunities.clean_headcount(10.0), int)
+    assert opportunities.clean_headcount(10.5) == 10.5
+    assert opportunities.clean_headcount(None) is None
+
+
+def test_output_values_applies_updates_and_leaves_everything_else(tmp_path):
+    path = tmp_path / "opps.csv"
+    make_opportunities_csv(path)
+    loaded = opportunities.load_destination(str(path))
+    row = loaded["rows"][0]
+    values = opportunities.output_values(loaded, row, {"headcount": 42, "reason": None})
+    assert values["Headcount"] == 42 and values["Reason"] == "old reason A" and values["Notes"] == "keep me"
 
 
 def test_load_rejects_a_file_missing_required_columns(tmp_path):

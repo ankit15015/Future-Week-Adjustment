@@ -4,7 +4,7 @@ Matches destination rows (from opportunities.py) against source records
 """
 import datetime as dt
 
-from .base_layer import normalize_workgroup
+from .base_layer import normalize_workgroup, split_workgroups
 
 
 def _time_diff_minutes(t1, t2):
@@ -58,7 +58,9 @@ def match_destination(loaded_destination, source_records):
         results.append({
             'index': row['index'],
             'workgroup': row['workgroup'],
+            'workgroups': split_workgroups(row['workgroup']),
             'weekday': row['weekday'],
+            'date': row['start_dt'].date().isoformat() if row['start_dt'] else '',
             'start_time': row['start_time'].strftime('%H:%M') if row['start_time'] else '',
             'end_time': row['end_time'].strftime('%H:%M') if row['end_time'] else '',
             'old_headcount': row['old_headcount'],

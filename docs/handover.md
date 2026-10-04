@@ -6,7 +6,7 @@ Read this first if you are taking the project over.
 
 The **Standard** workflow is complete and tested end to end: Base Layer -> minimum hours -> 1% rule
 -> Opportunities file -> match -> reasons -> reviewed, filterable final result -> download.
-`pytest` runs 46 tests (all passing at handover).
+`pytest` runs 56 tests (all passing at handover).
 
 Last verified on Python 3.13 on Windows. Render uses Python 3.11.9; that combination has **not**
 been run here (there is no CI), so run `pytest` on 3.11 before relying on it.
@@ -27,6 +27,11 @@ been run here (there is no CI), so run `pytest` on 3.11 before relying on it.
    `keep_vba`, so macros would be dropped on write.
 7. **A filtered download is a partial file by design** (it contains only the rows you filtered
    to). Do not use it where the full schedule is expected.
+
+8. **The front end has no automated tests.** The Python side is covered by `pytest`; the page
+   (`app.js`) was checked by driving it in a simulated browser (jsdom) against real Opportunities
+   files, but that script is not in the repo because it needs real data. If you change filtering or
+   the final-result table, test it by hand with a few different files.
 
 ## Gotchas
 

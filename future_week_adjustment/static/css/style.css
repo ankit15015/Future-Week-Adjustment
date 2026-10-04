@@ -401,6 +401,86 @@ button.secondary.small { padding: 5px 10px; font-size: 12px; }
 }
 .filter-count { color: var(--muted); font-size: 12.5px; margin-left: auto; white-space: nowrap; }
 
+/* Final result: every column of the output file, so the table scrolls sideways. */
+.final-options {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin: 0 0 8px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.final-options label { display: inline-flex; align-items: center; gap: 6px; font-weight: normal; }
+.legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  vertical-align: -2px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-ink);
+}
+/* Scrolling table area with a frozen header row, like a spreadsheet. */
+.table-scroll { max-height: 70vh; overflow: auto; margin-top: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.table-wrap.table-scroll { margin-top: 10px; }
+.table-scroll thead th { position: sticky; top: 0; z-index: 2; }
+
+/* Excel-style column filter: button in each header + the popup it opens. */
+.col-filter-btn {
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.col-filter-btn:hover { background: var(--line); color: var(--text, inherit); }
+.col-filter-btn.is-active { background: var(--accent); color: #fff; border-color: var(--accent-strong, var(--accent)); }
+.col-filter-popup {
+  position: fixed;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  max-height: min(420px, calc(100vh - 16px));
+  background: #fff;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  font-size: 13px;
+  font-weight: normal;
+}
+.cf-title { font-weight: 650; }
+.col-filter-popup .cf-search {
+  padding: 6px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+}
+.cf-row { display: flex; align-items: center; gap: 8px; padding: 3px 2px; font-weight: normal; cursor: pointer; }
+.cf-row:hover { background: #fafbfd; }
+.cf-all { border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.cf-list { overflow-y: auto; min-height: 60px; flex: 1; }
+.cf-val { flex: 1; overflow-wrap: anywhere; }
+.cf-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.cf-note { padding: 6px 2px; color: var(--muted); font-size: 12px; }
+.cf-actions { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.cf-spacer { flex: 1; }
+button.primary.small { padding: 5px 12px; font-size: 12px; }
+.cf-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.wide-table { width: max-content; min-width: 100%; }
+.wide-table th { white-space: normal; max-width: 200px; vertical-align: bottom; }
+.wide-table td.cell-changed { background: var(--accent-soft); color: var(--accent-ink); font-weight: 650; }
+.wide-table .meta-col { font-style: italic; background: #f6f7f9; }
+.wide-table tbody tr.row-failed .meta-col { background: transparent; }
+
 .one-percent-toolbar {
   display: flex;
   align-items: center;

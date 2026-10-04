@@ -132,6 +132,37 @@ def _parse_datetime(raw):
         return None
 
 
+def format_cell(value):
+    """A cell as it appears in the output file and in the on-screen final result."""
+    if value is None:
+        return ''
+    if isinstance(value, dt.datetime):
+        return value.strftime('%Y-%m-%dT%H:%M')
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def clean_headcount(value):
+    """Whole-number headcounts are written as 9, not 9.0 (the source parser yields floats)."""
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return value
+
+
+def output_values(loaded, parsed_row, update):
+    """
+    The row exactly as it is written to the output file: every original cell, with the
+    Headcount / Reason update applied (None = leave that cell as it was).
+    """
+    values = dict(parsed_row['raw'])
+    if update.get('headcount') is not None:
+        values[loaded['headers']['headcount']] = update['headcount']
+    if update.get('reason') is not None:
+        values[loaded['headers']['reason']] = update['reason']
+    return values
+
+
 def write_destination(loaded, updates, out_path, keep=None):
     """
     updates: dict {row_index: {'headcount': value_or_None, 'reason': value_or_None}}
@@ -145,12 +176,12 @@ def write_destination(loaded, updates, out_path, keep=None):
     reason_header = loaded['headers']['reason']
 
     if loaded['ext'] == '.csv':
-        _write_csv(loaded, updates, out_path, hc_header, reason_header, keep)
+        _write_csv(loaded, updates, out_path, keep)
     else:
         _write_xlsx(loaded, updates, out_path, hc_header, reason_header, keep)
 
 
-def _write_csv(loaded, updates, out_path, hc_header, reason_header, keep=None):
+def _write_csv(loaded, updates, out_path, keep=None):
     fieldnames = loaded['fieldnames']
     with open(out_path, 'w', encoding='utf-8-sig', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -158,13 +189,7 @@ def _write_csv(loaded, updates, out_path, hc_header, reason_header, keep=None):
         for parsed_row in loaded['rows']:
             if keep is not None and parsed_row['index'] not in keep:
                 continue
-            row = dict(parsed_row['raw'])
-            upd = updates.get(parsed_row['index'], {})
-            if upd.get('headcount') is not None:
-                row[hc_header] = upd['headcount']
-            if upd.get('reason') is not None:
-                row[reason_header] = upd['reason']
-            writer.writerow(row)
+            writer.writerow(output_values(loaded, parsed_row, updates.get(parsed_row['index'], {})))
 
 
 def _write_xlsx(loaded, updates, out_path, hc_header, reason_header, keep=None):
