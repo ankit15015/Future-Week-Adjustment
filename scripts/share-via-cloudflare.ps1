@@ -1,5 +1,11 @@
 $ErrorActionPreference = 'Continue'
+# cloudflared.exe is not in the repo (it is git-ignored): download it once from
+# https://github.com/cloudflare/cloudflared/releases and place it next to this script.
 $exe = Join-Path $PSScriptRoot "cloudflared.exe"
+if (-not (Test-Path $exe)) {
+    Write-Host "cloudflared.exe not found in $PSScriptRoot - see the comment at the top of this script." -ForegroundColor Red
+    exit 1
+}
 
 # Disable "QuickEdit" mode: normally, clicking inside this console window
 # freezes whatever is running until you click again or press Enter - which

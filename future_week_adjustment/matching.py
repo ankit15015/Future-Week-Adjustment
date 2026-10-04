@@ -1,10 +1,10 @@
 """
-Matches destination rows (from destination.py) against source records
-(from parsing.py) to compute the new Headcount (Column H) for each row.
+Matches destination rows (from opportunities.py) against source records
+(from base_layer.py) to compute the new Headcount (Column H) for each row.
 """
 import datetime as dt
 
-from parsing import normalize_workgroup
+from .base_layer import normalize_workgroup
 
 
 def _time_diff_minutes(t1, t2):

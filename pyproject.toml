@@ -1,0 +1,4 @@
+# Tool configuration only - this project is run from the repo root, not installed as a package.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

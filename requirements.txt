@@ -1,6 +1,8 @@
-flask
-openpyxl
-pyxlsb
-pymupdf
-rapidocr-onnxruntime
-gunicorn
+# Runtime dependencies. Ranges are compatible-release pins around the versions this was built and
+# tested with (Python 3.13); Render builds on Python 3.11 (see render.yaml).
+flask>=3.1,<4                  # web framework
+openpyxl>=3.1,<4               # read/write .xlsx (source and Opportunities files)
+pyxlsb>=1.0,<2                 # read .xlsb Base Layer files
+pymupdf>=1.24,<2               # render PDF pages to images for OCR
+rapidocr-onnxruntime>=1.2,<2   # OCR for screenshot/PDF sources
+gunicorn>=22,<24               # production WSGI server (Render); not used for local runs on Windows

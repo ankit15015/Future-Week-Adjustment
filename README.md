@@ -1,67 +1,88 @@
-# Baselayer -> Opportunities Dashboard
+# Future Week Adjustment
 
-A local dashboard to copy Headcount from a Base Layer source (Excel `.xlsx`,
-`.xlsb`, or a screenshot/PDF of one) into an Opportunities file (`.csv` or
-`.xlsx`), and to fill in the Reason column yourself right in the browser.
+A small web dashboard that copies **Headcount** from a *Base Layer* file (the plan) into an
+*Opportunities* file (the schedule export), lets you add a **Reason** per group of rows, shows
+the exact final result for review, and downloads the updated file.
 
-## Run it
+It runs on your own machine (`http://127.0.0.1:5057`) and can also be deployed to Render for
+teammates to try.
 
-```
-cd dashboard
-python app.py
-```
+## Quick start
 
-This opens `http://127.0.0.1:5057` in your browser automatically. It only
-listens on your own machine (127.0.0.1), nothing is exposed on the network.
+Requires Python 3.11+ (developed and tested on 3.13).
 
-First time only, install dependencies:
-
-```
+```bash
 pip install -r requirements.txt
+python run.py
 ```
 
-## How it works
+`run.py` opens the dashboard in your browser. It listens on `127.0.0.1` only, so nothing is
+exposed to the network.
 
-1. **Source** - pick a Base Layer file from the dropdown (it lists files
-   already sitting in this project's parent folder) or upload one. Works with
-   `.xlsx`/`.xlsb` directly, and with a screenshot/PDF via OCR (review the
-   extracted table before continuing - OCR can misread things, especially
-   anything covered by a tooltip/overlay in a screenshot; edit any cell
-   directly in the grid, or add/remove rows).
-2. **Destination** - pick or upload the Opportunities file (`.csv`/`.xlsx`).
-   Its Headcount and Reason columns are found by header name, not by a fixed
-   column letter, so minor column reordering won't break it.
-3. **Match** - matches each destination row to a source cell by weekday
-   (from its Start Date-Time) + workgroup + closest shift start time, and
-   always overwrites Headcount with the source value when a match is found.
-   Rows with no matching workgroup/day in the source keep their original
-   Headcount and are flagged "No source match" for you to check by hand.
-4. **Reason** - group by Workgroup or by Shift type, type a reason for each
-   group, plus one default/fallback reason, then preview.
-5. **Apply & download** - writes a new file named
-   `<original name> - Updated.csv` (or `.xlsx`) into `dashboard/output/`,
-   with everything else in the file untouched, and gives you a download link.
+## What it does
 
-## Deploy (e.g. for teammates to test)
+1. **Source** - load a Base Layer (`.xlsx`, `.xlsb`, or a screenshot/PDF read with OCR).
+2. **Minimum hours / 1% rule** - if the source states Minimum Hours, confirm them and check
+   the 1% rule before continuing.
+3. **Destination** - load the Opportunities file (`.csv` / `.xlsx`).
+4. **Match** - each row is matched to the source by weekday + workgroup + closest shift start
+   time; the new Headcount comes from the source.
+5. **Reason** - type a reason per workgroup or per shift type, plus a fallback.
+6. **Apply & download** - review the final table (filterable), then download. The file contains
+   exactly the rows shown, so filtering first gives you a filtered file.
 
-This repo includes a `render.yaml`, so on [Render](https://render.com):
+Full walkthrough: [docs/user-guide.md](docs/user-guide.md).
 
-1. Sign up / log in (free), then **New +** -> **Blueprint**.
-2. Connect this GitHub repo - Render reads `render.yaml` and configures itself.
-3. Click **Apply**. After the build finishes you get a public `https://...onrender.com` URL to share.
+## Project layout
 
-Notes for the deployed version specifically:
-- The "pick a file already in the folder" dropdowns will be empty there (that
-  only lists files sitting next to the app on *your own* machine) - use the
-  **Upload file** buttons instead, which work the same either way.
-- Free tier spins down after inactivity, so the first request after a while
-  takes ~30-60s to wake back up.
-- Uploaded/generated files live only for that running instance - they're
-  cleared on every redeploy.
+```
+.
+├── future_week_adjustment/        Python package (the application)
+│   ├── app.py                     Flask app: JSON API + page route
+│   ├── base_layer.py              Reads the Base Layer (xlsx/xlsb/OCR) and the 1% rule
+│   ├── opportunities.py           Reads/writes the Opportunities file (csv/xlsx)
+│   ├── matching.py                Row matching and reason assignment
+│   ├── templates/index.html       The single-page UI
+│   └── static/{css,js}/           Styles and front-end logic
+├── tests/                         pytest suite (synthetic data, no real files needed)
+├── docs/                          User guide, architecture, deployment, handover notes
+├── scripts/                       Windows helpers to share a local run via a temporary public link
+├── run.py                         Local entry point (opens the browser)
+├── wsgi.py                        Production entry point (gunicorn wsgi:app)
+├── render.yaml                    Render.com blueprint
+├── requirements.txt               Runtime dependencies
+├── requirements-dev.txt           Runtime + test dependencies
+└── instance/                      Created at runtime: uploads/ and output/ (git-ignored)
+```
 
-## Notes
+## Configuration
 
-- Nothing here is deleted/overwritten in place - the original file you picked
-  stays as-is, and a new "- Updated" file is written instead.
-- `dashboard/uploads/` and `dashboard/output/` are working folders for the
-  app; safe to clear out periodically.
+All optional.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `5057` | Port for `python run.py`. |
+| `DASHBOARD_SECRET` | random per start | Flask session signing key. Set it in production so sessions survive restarts (Render generates one). |
+| `DASHBOARD_DATA_DIR` | the folder that contains this project | Folder the "pick a file" dropdowns list. |
+
+## Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The suite builds small synthetic Base Layer and Opportunities files, so it needs none of the real
+data. It covers parsing, matching, reading/writing both file types, and the whole API flow,
+including that the downloaded file matches the on-screen final table row for row.
+
+## Documentation
+
+| Doc | For |
+| --- | --- |
+| [docs/user-guide.md](docs/user-guide.md) | Using the dashboard step by step |
+| [docs/architecture.md](docs/architecture.md) | How it is built, data flow, API reference, matching rules |
+| [docs/deployment.md](docs/deployment.md) | Running locally, deploying to Render, sharing a local run |
+| [docs/handover.md](docs/handover.md) | Current status, **known limitations**, gotchas, suggested next steps |
+
+If you are taking this project over, start with [docs/handover.md](docs/handover.md).

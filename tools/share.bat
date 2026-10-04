@@ -1,3 +1,0 @@
-@echo off
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0share.ps1"
-pause

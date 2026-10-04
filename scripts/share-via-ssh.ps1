@@ -17,7 +17,7 @@ public static extern bool SetConsoleMode(IntPtr hConsoleHandle, uint dwMode);
 } catch {}
 
 Write-Host ""
-Write-Host "Starting an ALTERNATE link via SSH (different provider/protocol than last time)." -ForegroundColor Cyan
+Write-Host "Starting a temporary public link via SSH (localhost.run) - an alternative to share-via-cloudflare." -ForegroundColor Cyan
 Write-Host "Keep this window OPEN the whole time anyone is using the link." -ForegroundColor Yellow
 Write-Host ""
 

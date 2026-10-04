@@ -1,9 +1,23 @@
+# Python
 __pycache__/
 *.pyc
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
 
-# User-uploaded / generated files - never commit real data
-uploads/
-output/
+# Runtime files created by the app (uploaded inputs and generated outputs) - never commit real data
+instance/
+
+# Local configuration / secrets
+.env
 
 # Downloaded third-party binary - not source, re-fetched by users who need it
-tools/cloudflared.exe
+scripts/cloudflared.exe
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

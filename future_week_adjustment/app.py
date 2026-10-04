@@ -1,20 +1,29 @@
+"""
+Flask app for the Future Week Adjustment dashboard: the JSON API plus the single page UI.
+
+State for a user's in-progress run (source records, loaded destination, match results)
+is kept server-side in SESSIONS, keyed by a session cookie - see docs/architecture.md.
+"""
 import os
 import uuid
-import threading
-import webbrowser
 from datetime import datetime
 
 from flask import Flask, jsonify, request, render_template, session, send_from_directory, abort
+from werkzeug.exceptions import HTTPException
 from werkzeug.utils import secure_filename
 
-import parsing
-import destination
-import matching
+from . import base_layer
+from . import matching
+from . import opportunities
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.abspath(os.path.join(BASE_DIR, '..'))
-UPLOAD_DIR = os.path.join(BASE_DIR, 'uploads')
-OUTPUT_DIR = os.path.join(BASE_DIR, 'output')
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Folder listed by the "pick a file" dropdowns. Defaults to the folder that contains this
+# project, so files sitting next to the repo show up; override with DASHBOARD_DATA_DIR.
+DATA_DIR = os.path.abspath(os.environ.get('DASHBOARD_DATA_DIR') or os.path.join(PROJECT_ROOT, '..'))
+# Working folders for uploaded inputs and generated outputs (git-ignored).
+INSTANCE_DIR = os.path.join(PROJECT_ROOT, 'instance')
+UPLOAD_DIR = os.path.join(INSTANCE_DIR, 'uploads')
+OUTPUT_DIR = os.path.join(INSTANCE_DIR, 'output')
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -25,6 +34,14 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('DASHBOARD_SECRET', 'local-dev-only-' + uuid.uuid4().hex)
 
 SESSIONS = {}
+
+
+@app.errorhandler(HTTPException)
+def handle_http_error(e):
+    """API errors come back as JSON {description} - the page shows that text to the user."""
+    if request.path.startswith('/api/'):
+        return jsonify({'description': e.description}), e.code
+    return e
 
 
 def get_session():
@@ -92,7 +109,7 @@ def _resolve_input_path(subdir):
 
 def _compute_one_percent(sdata):
     minimum_hours = sdata.get('minimum_hours', {})
-    results = parsing.compute_one_percent_rule(sdata.get('source_records', []), minimum_hours)
+    results = base_layer.compute_one_percent_rule(sdata.get('source_records', []), minimum_hours)
     sdata['one_percent_results'] = results
     sdata['one_percent_ok'] = all(r['passed'] for r in results)
     return results
@@ -105,7 +122,7 @@ def api_source():
     if ext not in SOURCE_EXTS:
         abort(400, description=f"Unsupported source file type: {ext}")
     try:
-        records, warnings, minimum_hours, total_hours = parsing.parse_source(path)
+        records, warnings, minimum_hours, total_hours = base_layer.parse_source(path)
     except Exception as e:
         abort(400, description=f"Could not read source file: {e}")
 
@@ -117,7 +134,7 @@ def api_source():
     sdata['min_hours_confirmed'] = not minimum_hours  # nothing to confirm if the source has none
     one_percent_results = _compute_one_percent(sdata)
 
-    weekdays_present = sorted(set(r['weekday'] for r in records), key=parsing.WEEKDAYS.index)
+    weekdays_present = sorted(set(r['weekday'] for r in records), key=base_layer.WEEKDAYS.index)
     workgroups = sorted(set(r['workgroup'] for r in records))
     return jsonify({
         'filename': orig_name,
@@ -141,9 +158,9 @@ def api_source_update():
             r['headcount'] = float(r['headcount'])
         except (TypeError, ValueError):
             abort(400, description=f"Invalid headcount value: {r.get('headcount')!r}")
-        if r.get('weekday') not in parsing.WEEKDAYS:
+        if r.get('weekday') not in base_layer.WEEKDAYS:
             abort(400, description=f"Invalid weekday: {r.get('weekday')!r}")
-        if not parsing.TIME_RE.match(str(r.get('start_time', ''))) or not parsing.TIME_RE.match(str(r.get('end_time', ''))):
+        if not base_layer.TIME_RE.match(str(r.get('start_time', ''))) or not base_layer.TIME_RE.match(str(r.get('end_time', ''))):
             abort(400, description="start_time/end_time must be in HH:MM format")
     sdata = get_session()
     sdata['source_records'] = records
@@ -193,7 +210,7 @@ def api_destination():
     if ext not in DEST_EXTS:
         abort(400, description=f"Unsupported destination file type: {ext}")
     try:
-        loaded = destination.load_destination(path)
+        loaded = opportunities.load_destination(path)
     except Exception as e:
         abort(400, description=f"Could not read destination file: {e}")
 
@@ -201,7 +218,7 @@ def api_destination():
     sdata['destination_filename'] = orig_name
 
     workgroups = sorted(set(r['workgroup'] for r in loaded['rows'] if r['workgroup']))
-    weekdays_present = sorted(set(r['weekday'] for r in loaded['rows'] if r['weekday']), key=parsing.WEEKDAYS.index)
+    weekdays_present = sorted(set(r['weekday'] for r in loaded['rows'] if r['weekday']), key=base_layer.WEEKDAYS.index)
     return jsonify({
         'filename': orig_name,
         'row_count': len(loaded['rows']),
@@ -323,7 +340,7 @@ def api_export():
     stem, ext = os.path.splitext(orig_name)
     out_name = f"{stem} - Updated{' (filtered)' if filtered else ''}{ext}"
     out_path = os.path.join(OUTPUT_DIR, out_name)
-    destination.write_destination(loaded, updates, out_path, keep=keep)
+    opportunities.write_destination(loaded, updates, out_path, keep=keep)
 
     written = [r for r in rows if keep is None or r['index'] in keep]
     return jsonify({
@@ -339,12 +356,3 @@ def api_export():
 @app.route('/api/download/<path:filename>')
 def api_download(filename):
     return send_from_directory(OUTPUT_DIR, filename, as_attachment=True)
-
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5057))
-    url = f"http://127.0.0.1:{port}/"
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
-    print(f"Dashboard running at {url}")
-    print(f"Data folder: {DATA_DIR}")
-    app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False)
