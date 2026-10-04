@@ -76,7 +76,7 @@ All API errors return JSON `{"description": "..."}` with the HTTP status; the UI
 | `POST /api/destination` | Load the Opportunities file | 400 until minimum hours are confirmed and the 1% rule passes |
 | `POST /api/match` | Match every destination row | |
 | `POST /api/reasons/preview` | Apply reasons | Body `{group_by, reason_map, default_reason}` |
-| `GET /api/final` | Final rows exactly as they will be written | Requires a reasons preview. Returns `columns` (every output column, file order), `headers` (detected Headcount/Reason/... column names) and `rows`. Each row has `values` (column -> text as written), `changed` (column -> original value, only for cells this tool changed), plus `index`, `workgroup`, `workgroups`, `weekday`, `date`, `start_time`, `end_time`, `updated`, `confidence`, `matched_shift_name` |
+| `GET /api/final` | Final rows exactly as they will be written | Requires a reasons preview. Returns `columns` (every output column, file order), `headers` (detected Headcount/Reason/... column names) and `rows`. Each row has `values` (column -> text as written), `changed` (column -> original value, only for cells this tool changed), plus `index`, `workgroup`, `workgroups`, `weekday`, `start_date`, `end_date`, `start_time`, `end_time`, `updated`, `confidence`, `matched_shift_name` |
 | `POST /api/export` | Write the file | Body `{indices?: number[]}`; returns `download_url`, `rows_written`, `rows_total`, `rows_unmatched`, `filtered` |
 | `GET /api/download/<file>` | Download a generated file | Served from `instance/output/` |
 
@@ -100,13 +100,18 @@ file lists, source, minimum hours / 1% rule, destination, match, reasons, export
 
 Filtering is shared by the two review tables (Match and final result):
 
+- `toggleChecklist(...)` is the one checklist popup (searchable values with counts, Select all, OK)
+  shared by both kinds of multi-select filter below.
 - `createColumnFilters(...)` is a reusable Excel-style AutoFilter: a button per column header that
-  opens a searchable checklist of that column's distinct values (with counts), cascading with the
-  other filters. A table supplies `getRows`, `getColumns` (key, label, `value(row)`),
-  `passesOtherFilters` and `onChange`. The final result builds its columns from the loaded file,
-  so any column set works.
-- `populateCommonFilters` / `matchesCommonFilters` drive the quick filters above each table
-  (individual workgroups via `split_workgroups`, day, date, 24-hour start/end).
+  opens the checklist for that column's distinct values, cascading with the other filters. A table
+  supplies `getRows`, `getColumns` (key, label, `value(row)`), `passesOtherFilters` and `onChange`.
+  The final result builds its columns from the loaded file, so any column set works.
+- `createQuickFilters(prefix, {extra, onChange})` drives the filter bar above each table: multi-select
+  buttons for workgroup (individual names via `split_workgroups`), day, 24-hour start time, 24-hour
+  end time and one table-specific field (`extra`), plus start-date and end-date ranges. Match
+  results and final rows carry `start_date` and `end_date` (the end date is the next day for
+  overnight shifts); the final table shows them, with the start/end times, as review-only columns -
+  the downloaded file keeps only the original columns.
 - The final result downloads exactly the rows left after all filters: the page sends their `index`
   values to `POST /api/export`.
 Screens (`mode-select`, `mode-gate`, `cap-notice`, `standard-mode`) are shown/hidden with a

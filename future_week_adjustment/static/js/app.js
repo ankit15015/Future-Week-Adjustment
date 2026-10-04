@@ -498,8 +498,9 @@ function renderMatchTableRows(results) {
       <td>${r.index + 1}</td>
       <td>${escapeHtml(r.workgroup)}</td>
       <td>${escapeHtml(r.weekday || '')}</td>
-      <td>${escapeHtml(r.date || '')}</td>
+      <td>${escapeHtml(r.start_date || '')}</td>
       <td>${escapeHtml(r.start_time)}</td>
+      <td>${escapeHtml(r.end_date || '')}</td>
       <td>${escapeHtml(r.end_time)}</td>
       <td>${escapeHtml(r.old_headcount)}</td>
       <td><strong>${r.new_headcount !== null && r.new_headcount !== undefined ? r.new_headcount : '—'}</strong></td>
@@ -511,71 +512,19 @@ function renderMatchTableRows(results) {
 }
 
 // ---- filters shared by the Match table and the final result ----
-// Both tables filter on the same things: workgroup (each workgroup on its own - combined
-// labels like "Pack - Batch, Sort" are split), day, date, and start/end time (24-hour).
-// `prefix` is the id prefix of the filter bar: 'filter' (Match) or 'final-filter' (final result).
+// Three kinds of filter, multi-select wherever a column has several possible values:
+//   1. a checklist popup (searchable list of values with counts, Select all, OK) used by both below;
+//   2. quick filters above each table: workgroup, day, start time and end time (24-hour) plus one
+//      table-specific field, each multi-select, and start-date / end-date ranges;
+//   3. Excel-style column filters: a button on every column header.
 
-const COMMON_FILTERS = ['workgroup', 'day', 'date', 'start', 'end'];
+const BLANK_LABEL = '(Blanks)';
+const FILTER_LIST_LIMIT = 500;
 
 function rowWorkgroups(r) {
   if (r.workgroups && r.workgroups.length) return r.workgroups;
   return r.workgroup ? [r.workgroup] : [];
 }
-
-function fillSelect(id, allLabel, options) {
-  const select = el(id);
-  const previous = select.value;
-  select.innerHTML = `<option value="">${allLabel}</option>` +
-    options.map(([value, label]) => `<option value="${escapeAttr(value)}">${escapeHtml(label)}</option>`).join('');
-  if (options.some(([value]) => value === previous)) select.value = previous;
-}
-
-function populateCommonFilters(prefix, rows) {
-  const byLower = new Map();
-  rows.forEach(r => rowWorkgroups(r).forEach(w => { if (!byLower.has(w.toLowerCase())) byLower.set(w.toLowerCase(), w); }));
-  const workgroups = [...byLower.values()].sort((a, b) => a.localeCompare(b));
-  const days = WEEKDAY_OPTIONS.filter(d => rows.some(r => r.weekday === d));
-  const weekdayOfDate = {};
-  rows.forEach(r => { if (r.date) weekdayOfDate[r.date] = r.weekday || ''; });
-  const dates = Object.keys(weekdayOfDate).sort();
-  const distinctSorted = key => [...new Set(rows.map(r => r[key]).filter(Boolean))].sort();   // 'HH:MM' sorts correctly
-
-  fillSelect(`${prefix}-workgroup`, 'All workgroups', workgroups.map(w => [w, w]));
-  fillSelect(`${prefix}-day`, 'All days', days.map(d => [d, d]));
-  fillSelect(`${prefix}-date`, 'All dates',
-    dates.map(d => [d, weekdayOfDate[d] ? `${d} (${weekdayOfDate[d].slice(0, 3)})` : d]));
-  fillSelect(`${prefix}-start`, 'Any start (24h)', distinctSorted('start_time').map(t => [t, t]));
-  fillSelect(`${prefix}-end`, 'Any end (24h)', distinctSorted('end_time').map(t => [t, t]));
-}
-
-function matchesCommonFilters(prefix, r) {
-  const value = name => el(`${prefix}-${name}`).value;
-  const wg = value('workgroup').toLowerCase();
-  if (wg && !rowWorkgroups(r).some(w => w.toLowerCase() === wg)) return false;
-  if (value('day') && r.weekday !== value('day')) return false;
-  if (value('date') && r.date !== value('date')) return false;
-  if (value('start') && r.start_time !== value('start')) return false;
-  if (value('end') && r.end_time !== value('end')) return false;
-  return true;
-}
-
-function resetCommonFilters(prefix) {
-  COMMON_FILTERS.forEach(name => { el(`${prefix}-${name}`).value = ''; });
-}
-
-// ---- Excel-style column filters ----
-// Every column of a review table gets a filter button in its header. It opens a searchable list
-// of the distinct values in that column (with counts) to tick, like Excel's AutoFilter. Filters on
-// several columns combine (AND), and a column's list only offers values still possible under the
-// other filters. The columns come from the loaded file, so whatever it contains can be filtered.
-//
-//   getRows()             all rows of the table
-//   getColumns()          [{key, label, value(row) -> string, title?}] currently shown columns
-//   passesOtherFilters(r) the table's other (non-column) filters, so lists stay in step with them
-//   onChange()            called after a filter is applied or cleared
-
-const BLANK_LABEL = '(Blanks)';
-const FILTER_LIST_LIMIT = 500;
 
 function sortFilterValues(values) {
   const blanks = values.filter(v => v === '');
@@ -587,9 +536,242 @@ function sortFilterValues(values) {
   return [...rest, ...blanks];
 }
 
+// ---- 1. checklist popup ----
+
+let activeChecklist = null;   // only one popup is open at a time
+
+function closeChecklist() {
+  if (activeChecklist) activeChecklist.close();
+}
+
+// Opens (or, if it is already open for this anchor, closes) the checklist popup.
+//   items:    [{value, label, count}] in display order
+//   selected: Set of values to keep, or null for "everything"
+//   onApply:  called with a Set of values to keep, or null when everything is ticked (= no filter)
+function toggleChecklist({ anchor, title, items, selected, onApply }) {
+  if (activeChecklist && activeChecklist.anchor === anchor) { closeChecklist(); return; }
+  closeChecklist();
+
+  const values = items.map(i => i.value);
+  const draft = new Set(selected ? values.filter(v => selected.has(v)) : values);
+  const popup = document.createElement('div');
+  popup.className = 'col-filter-popup';
+  popup.setAttribute('role', 'dialog');
+  popup.setAttribute('aria-label', `Filter ${title}`);
+  popup.innerHTML = `
+    <div class="cf-title">${escapeHtml(title)}</div>
+    <input type="text" class="cf-search" placeholder="Search" aria-label="Search values">
+    <label class="cf-row cf-all"><input type="checkbox" class="cf-all-box"> <span>(Select all)</span></label>
+    <div class="cf-list"></div>
+    <div class="cf-actions">
+      <button type="button" class="secondary small cf-clear">Clear filter</button>
+      <span class="cf-spacer"></span>
+      <button type="button" class="secondary small cf-cancel">Cancel</button>
+      <button type="button" class="primary small cf-ok">OK</button>
+    </div>`;
+  document.body.appendChild(popup);
+  const listEl = popup.querySelector('.cf-list');
+  const searchEl = popup.querySelector('.cf-search');
+  const allBox = popup.querySelector('.cf-all-box');
+  const okBtn = popup.querySelector('.cf-ok');
+
+  function onOutsideClick(e) { if (!popup.contains(e.target) && !anchor.contains(e.target)) close(); }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  function onScroll(e) { if (!popup.contains(e.target)) close(); }
+  function close() {
+    popup.remove();
+    activeChecklist = null;
+    document.removeEventListener('mousedown', onOutsideClick, true);
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('scroll', onScroll, true);
+    window.removeEventListener('resize', close);
+  }
+
+  const visibleItems = () => {
+    const q = searchEl.value.trim().toLowerCase();
+    return q ? items.filter(i => i.label.toLowerCase().includes(q)) : items;
+  };
+  function syncControls() {
+    const visible = visibleItems();
+    const ticked = visible.filter(i => draft.has(i.value)).length;
+    allBox.checked = visible.length > 0 && ticked === visible.length;
+    allBox.indeterminate = ticked > 0 && ticked < visible.length;
+    okBtn.disabled = draft.size === 0;
+  }
+  function renderList() {
+    const visible = visibleItems();
+    listEl.innerHTML = visible.slice(0, FILTER_LIST_LIMIT).map(i => `
+      <label class="cf-row"><input type="checkbox" data-i="${items.indexOf(i)}"${draft.has(i.value) ? ' checked' : ''}>
+        <span class="cf-val">${escapeHtml(i.label)}</span><span class="cf-count">${i.count}</span></label>`).join('') +
+      (visible.length > FILTER_LIST_LIMIT ? `<div class="cf-note">Showing the first ${FILTER_LIST_LIMIT} of ${visible.length} - type to narrow the list.</div>` : '') +
+      (visible.length === 0 ? '<div class="cf-note">No matching values.</div>' : '');
+    syncControls();
+  }
+
+  listEl.addEventListener('change', e => {
+    const box = e.target.closest('input[data-i]');
+    if (!box) return;
+    const v = items[Number(box.dataset.i)].value;
+    if (box.checked) draft.add(v); else draft.delete(v);
+    syncControls();
+  });
+  searchEl.addEventListener('input', renderList);
+  allBox.addEventListener('change', () => {
+    visibleItems().forEach(i => { if (allBox.checked) draft.add(i.value); else draft.delete(i.value); });
+    renderList();
+  });
+  popup.querySelector('.cf-cancel').addEventListener('click', close);
+  popup.querySelector('.cf-clear').addEventListener('click', () => { close(); onApply(null); });
+  okBtn.addEventListener('click', () => {
+    const everything = values.every(v => draft.has(v));
+    close();
+    onApply(everything ? null : new Set(draft));
+  });
+
+  renderList();
+  // Fixed position so a table's own scrolling can't clip it; clamp to the viewport.
+  const rect = anchor.getBoundingClientRect();
+  const width = 270;
+  popup.style.width = `${width}px`;
+  popup.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+  popup.style.top = `${rect.bottom + 4}px`;
+  popup.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - popup.offsetHeight - 8))}px`;
+  document.addEventListener('mousedown', onOutsideClick, true);
+  document.addEventListener('keydown', onKey, true);
+  document.addEventListener('scroll', onScroll, true);
+  window.addEventListener('resize', close);
+  activeChecklist = { anchor, popup, close };
+  searchEl.focus({ preventScroll: true });   // a scroll would close the popup straight away
+}
+
+// ---- 2. quick filters above a table ----
+// `prefix` is the id prefix of the filter bar ('filter' = Match, 'final-filter' = final result).
+// `extra` describes one table-specific multi-select field (confidence / match status).
+// Workgroup lists each workgroup on its own: a combined label such as "Pack - Batch, Sort" is split,
+// and a row matches when any of its workgroups is ticked.
+
+function createQuickFilters(prefix, { extra, onChange }) {
+  const fields = [
+    { id: 'workgroup', all: 'All workgroups', title: 'Workgroup', values: r => rowWorkgroups(r), ci: true },
+    { id: 'day', all: 'All days', title: 'Day', values: r => (r.weekday ? [r.weekday] : []), order: WEEKDAY_OPTIONS },
+    { id: 'start', all: 'Any start time (24h)', title: 'Start time (24-hour)', values: r => (r.start_time ? [r.start_time] : []) },
+    { id: 'end', all: 'Any end time (24h)', title: 'End time (24-hour)', values: r => (r.end_time ? [r.end_time] : []) },
+    extra,
+  ];
+  const dateRanges = [
+    { id: 'start-date', get: r => r.start_date },
+    { id: 'end-date', get: r => r.end_date },
+  ];
+  const selected = new Map();   // field id -> Set of item values
+  let rows = [];
+  const keyOf = (f, v) => (f.ci ? v.toLowerCase() : v);
+
+  function itemsFor(f) {
+    const counts = new Map();
+    const labels = new Map();
+    rows.forEach(r => {
+      const seen = new Set();
+      f.values(r).forEach(v => {
+        const k = keyOf(f, v);
+        if (seen.has(k)) return;
+        seen.add(k);
+        counts.set(k, (counts.get(k) || 0) + 1);
+        if (!labels.has(k)) labels.set(k, f.label ? f.label(v) : v);
+      });
+    });
+    const keys = f.order
+      ? f.order.map(o => keyOf(f, o)).filter(k => counts.has(k))
+      : [...counts.keys()].sort((a, b) => labels.get(a).localeCompare(labels.get(b), undefined, { numeric: true, sensitivity: 'base' }));
+    return keys.map(k => ({ value: k, label: labels.get(k), count: counts.get(k) }));
+  }
+
+  function renderButton(f) {
+    const btn = el(`${prefix}-${f.id}`);
+    const sel = selected.get(f.id);
+    let text = f.all;
+    if (sel) {
+      const names = itemsFor(f).filter(i => sel.has(i.value)).map(i => i.label);
+      text = names.length === 1 ? names[0] : `${names.length} selected`;
+    }
+    btn.textContent = text;
+    btn.classList.toggle('is-active', Boolean(sel));
+    btn.title = sel ? `${f.title}: filtered - click to change` : `${f.title}: all`;
+  }
+
+  fields.forEach(f => {
+    const btn = el(`${prefix}-${f.id}`);
+    btn.addEventListener('click', () => toggleChecklist({
+      anchor: btn,
+      title: f.title,
+      items: itemsFor(f),
+      selected: selected.get(f.id) || null,
+      onApply: set => {
+        if (set) selected.set(f.id, set); else selected.delete(f.id);
+        renderButton(f);
+        onChange();
+      },
+    }));
+  });
+  dateRanges.forEach(d => ['from', 'to'].forEach(side => el(`${prefix}-${d.id}-${side}`).addEventListener('change', onChange)));
+
+  return {
+    // Call whenever the table's rows change: refreshes the lists and drops choices that no longer exist.
+    populate(newRows) {
+      rows = newRows;
+      fields.forEach(f => {
+        const sel = selected.get(f.id);
+        if (sel) {
+          const stillThere = new Set(itemsFor(f).map(i => i.value));
+          const kept = new Set([...sel].filter(v => stillThere.has(v)));
+          if (kept.size) selected.set(f.id, kept); else selected.delete(f.id);
+        }
+        renderButton(f);
+      });
+      dateRanges.forEach(d => {
+        const dates = rows.map(d.get).filter(Boolean).sort();
+        ['from', 'to'].forEach(side => {
+          const input = el(`${prefix}-${d.id}-${side}`);
+          input.min = dates[0] || '';
+          input.max = dates[dates.length - 1] || '';
+        });
+      });
+    },
+    matches(r) {
+      for (const f of fields) {
+        const sel = selected.get(f.id);
+        if (sel && !f.values(r).some(v => sel.has(keyOf(f, v)))) return false;
+      }
+      for (const d of dateRanges) {
+        const from = el(`${prefix}-${d.id}-from`).value;
+        const to = el(`${prefix}-${d.id}-to`).value;
+        if (!from && !to) continue;
+        const day = d.get(r);   // ISO dates compare correctly as text
+        if (!day || (from && day < from) || (to && day > to)) return false;
+      }
+      return true;
+    },
+    reset() {
+      selected.clear();
+      dateRanges.forEach(d => ['from', 'to'].forEach(side => { el(`${prefix}-${d.id}-${side}`).value = ''; }));
+      fields.forEach(renderButton);
+      closeChecklist();
+    },
+  };
+}
+
+// ---- 3. Excel-style column filters ----
+// Every column of a review table gets a filter button in its header. It opens the checklist popup
+// for that column's distinct values, like Excel's AutoFilter. Filters on several columns combine
+// (AND), and a column's list only offers values still possible under the other filters. The columns
+// come from the loaded file, so whatever it contains can be filtered.
+//
+//   getRows()             all rows of the table
+//   getColumns()          [{key, label, value(row) -> string, title?}] currently shown columns
+//   passesOtherFilters(r) the table's other (non-column) filters, so lists stay in step with them
+//   onChange()            called after a filter is applied or cleared
+
 function createColumnFilters({ getRows, getColumns, passesOtherFilters, onChange }) {
   const selected = new Map();   // column key -> Set of values to keep
-  let popup = null;
 
   function matches(row, exceptKey) {
     for (const col of getColumns()) {
@@ -600,23 +782,7 @@ function createColumnFilters({ getRows, getColumns, passesOtherFilters, onChange
     return true;
   }
 
-  function onOutsideClick(e) {
-    if (popup && !popup.contains(e.target) && !e.target.closest('.col-filter-btn')) closePopup();
-  }
-  function onKey(e) { if (e.key === 'Escape') closePopup(); }
-  function onScroll(e) { if (popup && !popup.contains(e.target)) closePopup(); }
-
-  function closePopup() {
-    if (!popup) return;
-    popup.remove();
-    popup = null;
-    document.removeEventListener('mousedown', onOutsideClick, true);
-    document.removeEventListener('keydown', onKey, true);
-    document.removeEventListener('scroll', onScroll, true);
-    window.removeEventListener('resize', closePopup);
-  }
-
-  function openPopup(key, btn) {
+  function open(key, btn) {
     const col = getColumns().find(c => c.key === key);
     if (!col) return;
     const counts = new Map();
@@ -624,100 +790,30 @@ function createColumnFilters({ getRows, getColumns, passesOtherFilters, onChange
       const v = col.value(r);
       counts.set(v, (counts.get(v) || 0) + 1);
     });
-    const values = sortFilterValues([...counts.keys()]);
-    const index = new Map(values.map((v, i) => [v, i]));
+    const items = sortFilterValues([...counts.keys()]).map(v => ({ value: v, label: v === '' ? BLANK_LABEL : v, count: counts.get(v) }));
     const current = selected.get(key);
-    const draft = new Set(current ? values.filter(v => current.has(v)) : values);
-
-    popup = document.createElement('div');
-    popup.className = 'col-filter-popup';
-    popup.dataset.col = key;
-    popup.setAttribute('role', 'dialog');
-    popup.setAttribute('aria-label', `Filter ${col.label}`);
-    popup.innerHTML = `
-      <div class="cf-title">${escapeHtml(col.label)}</div>
-      <input type="text" class="cf-search" placeholder="Search" aria-label="Search values">
-      <label class="cf-row cf-all"><input type="checkbox" class="cf-all-box"> <span>(Select all)</span></label>
-      <div class="cf-list"></div>
-      <div class="cf-actions">
-        <button type="button" class="secondary small cf-clear">Clear filter</button>
-        <span class="cf-spacer"></span>
-        <button type="button" class="secondary small cf-cancel">Cancel</button>
-        <button type="button" class="primary small cf-ok">OK</button>
-      </div>`;
-    document.body.appendChild(popup);
-    const listEl = popup.querySelector('.cf-list');
-    const searchEl = popup.querySelector('.cf-search');
-    const allBox = popup.querySelector('.cf-all-box');
-    const okBtn = popup.querySelector('.cf-ok');
-
-    const labelOf = v => (v === '' ? BLANK_LABEL : v);
-    const visibleValues = () => {
-      const q = searchEl.value.trim().toLowerCase();
-      return q ? values.filter(v => labelOf(v).toLowerCase().includes(q)) : values;
-    };
-    function syncControls() {
-      const visible = visibleValues();
-      const ticked = visible.filter(v => draft.has(v)).length;
-      allBox.checked = visible.length > 0 && ticked === visible.length;
-      allBox.indeterminate = ticked > 0 && ticked < visible.length;
-      okBtn.disabled = draft.size === 0;
-    }
-    function renderList() {
-      const visible = visibleValues();
-      listEl.innerHTML = visible.slice(0, FILTER_LIST_LIMIT).map(v => `
-        <label class="cf-row"><input type="checkbox" data-i="${index.get(v)}"${draft.has(v) ? ' checked' : ''}>
-          <span class="cf-val">${escapeHtml(labelOf(v))}</span><span class="cf-count">${counts.get(v)}</span></label>`).join('') +
-        (visible.length > FILTER_LIST_LIMIT ? `<div class="cf-note">Showing the first ${FILTER_LIST_LIMIT} of ${visible.length} - type to narrow the list.</div>` : '') +
-        (visible.length === 0 ? '<div class="cf-note">No matching values.</div>' : '');
-      syncControls();
-    }
-
-    listEl.addEventListener('change', e => {
-      const box = e.target.closest('input[data-i]');
-      if (!box) return;
-      const v = values[Number(box.dataset.i)];
-      if (box.checked) draft.add(v); else draft.delete(v);
-      syncControls();
+    toggleChecklist({
+      anchor: btn,
+      title: col.label,
+      items,
+      selected: current || null,
+      onApply: set => {
+        if (!set) {
+          selected.delete(key);
+        } else {
+          const keep = new Set(set);
+          if (current) current.forEach(v => { if (!counts.has(v)) keep.add(v); });   // values other filters hide right now
+          selected.set(key, keep);
+        }
+        onChange();
+      },
     });
-    searchEl.addEventListener('input', renderList);
-    allBox.addEventListener('change', () => {
-      visibleValues().forEach(v => { if (allBox.checked) draft.add(v); else draft.delete(v); });
-      renderList();
-    });
-    popup.querySelector('.cf-cancel').addEventListener('click', closePopup);
-    popup.querySelector('.cf-clear').addEventListener('click', () => { selected.delete(key); closePopup(); onChange(); });
-    okBtn.addEventListener('click', () => {
-      if (values.every(v => draft.has(v))) {
-        selected.delete(key);                                   // everything ticked = no filter
-      } else {
-        const keep = new Set(draft);
-        if (current) current.forEach(v => { if (!counts.has(v)) keep.add(v); });   // values other filters hide right now
-        selected.set(key, keep);
-      }
-      closePopup();
-      onChange();
-    });
-
-    renderList();
-    // Fixed position so the table's own scrolling can't clip it; clamp to the viewport.
-    const rect = btn.getBoundingClientRect();
-    const width = 270;
-    popup.style.width = `${width}px`;
-    popup.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
-    popup.style.top = `${rect.bottom + 4}px`;
-    popup.style.top = `${Math.max(8, Math.min(rect.bottom + 4, window.innerHeight - popup.offsetHeight - 8))}px`;
-    document.addEventListener('mousedown', onOutsideClick, true);
-    document.addEventListener('keydown', onKey, true);
-    document.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', closePopup);
-    searchEl.focus();
   }
 
   return {
     matches: row => matches(row),
-    clear() { selected.clear(); closePopup(); },
-    close: closePopup,
+    clear() { selected.clear(); closeChecklist(); },
+    close: closeChecklist,
     activeCount: () => getColumns().filter(c => selected.has(c.key)).length,
     headerCell(col, extraClass) {
       const on = selected.has(col.key);
@@ -728,10 +824,7 @@ function createColumnFilters({ getRows, getColumns, passesOtherFilters, onChange
     bind(thead) {
       thead.addEventListener('click', e => {
         const btn = e.target.closest('.col-filter-btn');
-        if (!btn) return;
-        if (popup && popup.dataset.col === btn.dataset.col) { closePopup(); return; }
-        closePopup();
-        openPopup(btn.dataset.col, btn);
+        if (btn) open(btn.dataset.col, btn);
       });
     },
   };
@@ -744,23 +837,31 @@ const MATCH_COLUMNS = [
   { key: 'index', label: '#', value: r => String(r.index + 1) },
   { key: 'workgroup', label: 'Workgroup', value: r => r.workgroup },
   { key: 'weekday', label: 'Day', value: r => r.weekday || '' },
-  { key: 'date', label: 'Date', value: r => r.date || '' },
-  { key: 'start', label: 'Start', value: r => r.start_time },
-  { key: 'end', label: 'End', value: r => r.end_time },
+  { key: 'start_date', label: 'Start date', value: r => r.start_date || '' },
+  { key: 'start', label: 'Start time', value: r => r.start_time },
+  { key: 'end_date', label: 'End date', value: r => r.end_date || '' },
+  { key: 'end', label: 'End time', value: r => r.end_time },
   { key: 'old', label: 'Old Headcount', value: r => String(r.old_headcount) },
   { key: 'new', label: 'New Headcount', value: r => (r.new_headcount === null || r.new_headcount === undefined ? '—' : String(r.new_headcount)) },
   { key: 'confidence', label: 'Confidence', value: r => confidenceLabel(r.confidence) },
   { key: 'reason', label: 'Reason', value: r => r.reason || '' },
 ];
 
+const matchQuickFilters = createQuickFilters('filter', {
+  extra: {
+    id: 'confidence', all: 'All confidence levels', title: 'Confidence',
+    values: r => [r.confidence], label: confidenceLabel,
+    order: ['exact', 'near', 'far', 'no_source_match', 'no_time'],
+  },
+  onChange: () => applyFiltersAndRender(),
+});
+
 // The filter bar above the table (everything except the per-column filters).
 function passesMatchBarFilters(r) {
-  if (!matchesCommonFilters('filter', r)) return false;
-  const conf = el('filter-confidence').value;
-  if (conf && r.confidence !== conf) return false;
+  if (!matchQuickFilters.matches(r)) return false;
   const search = el('filter-search').value.trim().toLowerCase();
   if (search) {
-    const haystack = `${r.workgroup} ${r.matched_shift_name || ''} ${r.reason || ''} ${r.date || ''} ${r.start_time} ${r.end_time}`.toLowerCase();
+    const haystack = `${r.workgroup} ${r.matched_shift_name || ''} ${r.reason || ''} ${r.start_date || ''} ${r.end_date || ''} ${r.start_time} ${r.end_time}`.toLowerCase();
     if (!haystack.includes(search)) return false;
   }
   return true;
@@ -787,23 +888,18 @@ function applyFiltersAndRender() {
 
 function setResultsAndRender(results, resetFilters) {
   state.allResults = results.map((r, i) => ({ ...r, index: r.index !== undefined ? r.index : i }));
-  populateCommonFilters('filter', state.allResults);
+  matchQuickFilters.populate(state.allResults);
   if (resetFilters) {
-    resetCommonFilters('filter');
-    el('filter-confidence').value = '';
+    matchQuickFilters.reset();
     el('filter-search').value = '';
     matchColumnFilters.clear();
   }
   applyFiltersAndRender();
 }
 
-[...COMMON_FILTERS.map(name => `filter-${name}`), 'filter-confidence'].forEach(id => {
-  el(id).addEventListener('change', applyFiltersAndRender);
-});
 el('filter-search').addEventListener('input', applyFiltersAndRender);
 el('filter-reset-btn').addEventListener('click', () => {
-  resetCommonFilters('filter');
-  el('filter-confidence').value = '';
+  matchQuickFilters.reset();
   el('filter-search').value = '';
   matchColumnFilters.clear();
   applyFiltersAndRender();
@@ -883,16 +979,28 @@ function finalColumnDefs() {
     { key: 'meta:row', label: '#', meta: true, title: 'Row number in the file (review only)', value: r => String(r.index + 1) },
     { key: 'meta:match', label: 'Match', meta: true, title: 'How this row matched the source (review only, not written to the file)', value: r => confidenceLabel(r.confidence) },
     { key: 'meta:shift', label: 'Source shift', meta: true, title: 'Source shift it matched (review only, not written to the file)', value: r => r.matched_shift_name || '' },
+    // The file keeps start/end as one date-time cell; these split it so dates and 24-hour times can be filtered.
+    { key: 'meta:start_date', label: 'Start date', meta: true, title: 'Review only, not written to the file (the file keeps the combined date-time column)', value: r => r.start_date || '' },
+    { key: 'meta:start_time', label: 'Start time', meta: true, title: 'Review only, not written to the file (the file keeps the combined date-time column)', value: r => r.start_time || '' },
+    { key: 'meta:end_date', label: 'End date', meta: true, title: 'Review only, not written to the file (the file keeps the combined date-time column)', value: r => r.end_date || '' },
+    { key: 'meta:end_time', label: 'End time', meta: true, title: 'Review only, not written to the file (the file keeps the combined date-time column)', value: r => r.end_time || '' },
     ...finalShownColumns().map(col => ({ key: `file:${col}`, label: col, file: col, value: r => r.values[col] ?? '' })),
   ];
 }
 
+const finalQuickFilters = createQuickFilters('final-filter', {
+  extra: {
+    id: 'status', all: 'All rows', title: 'Match status',
+    values: r => [r.updated ? 'matched' : 'nomatch'],
+    label: v => (v === 'matched' ? 'Matched to source' : 'No source match (kept as is)'),
+    order: ['matched', 'nomatch'],
+  },
+  onChange: () => renderFinalTable(),
+});
+
 // The filter bar above the table (everything except the per-column filters).
 function passesFinalBarFilters(r) {
-  if (!matchesCommonFilters('final-filter', r)) return false;
-  const status = el('final-filter-status').value;
-  if (status === 'updated' && !r.updated) return false;
-  if (status === 'unchanged' && r.updated) return false;
+  if (!finalQuickFilters.matches(r)) return false;
   const search = el('final-filter-search').value.trim().toLowerCase();
   if (search && !Object.values(r.values).join(' ').toLowerCase().includes(search)) return false;
   return true;
@@ -908,9 +1016,8 @@ finalColumnFilters.bind(document.querySelector('#export-preview-table thead'));
 
 function finalRowHtml(r, defs) {
   return `<tr class="${r.updated ? '' : 'row-failed'}">` + defs.map(def => {
-    if (def.key === 'meta:row') return `<td class="meta-col">${r.index + 1}</td>`;
     if (def.key === 'meta:match') return `<td class="meta-col"><span class="badge ${r.confidence}">${confidenceLabel(r.confidence)}</span></td>`;
-    if (def.key === 'meta:shift') return `<td class="meta-col">${escapeHtml(r.matched_shift_name || '')}</td>`;
+    if (def.meta) return `<td class="meta-col">${escapeHtml(def.value(r))}</td>`;
     const changed = Object.prototype.hasOwnProperty.call(r.changed, def.file);
     const title = changed ? ` title="Was: ${escapeAttr(r.changed[def.file] === '' ? '(blank)' : r.changed[def.file])}"` : '';
     return `<td class="${changed ? 'cell-changed' : ''}"${title}>${escapeHtml(def.value(r))}</td>`;
@@ -937,13 +1044,10 @@ function renderFinalTable() {
   el('export-confirm-btn').disabled = shown === 0;
 }
 
-[...COMMON_FILTERS.map(name => `final-filter-${name}`), 'final-filter-status', 'final-hide-empty'].forEach(id => {
-  el(id).addEventListener('change', renderFinalTable);
-});
+el('final-hide-empty').addEventListener('change', renderFinalTable);
 el('final-filter-search').addEventListener('input', renderFinalTable);
 el('final-filter-reset-btn').addEventListener('click', () => {
-  resetCommonFilters('final-filter');
-  el('final-filter-status').value = '';
+  finalQuickFilters.reset();
   el('final-filter-search').value = '';
   finalColumnFilters.clear();
   renderFinalTable();
@@ -969,9 +1073,8 @@ el('export-review-btn').addEventListener('click', async () => {
     el('export-review-text').textContent =
       `${total} row(s) total — ${total - unmatched} will get an updated Headcount` +
       (unmatched ? `, ${unmatched} have no source match and keep their original Headcount (highlighted red below).` : '.');
-    populateCommonFilters('final-filter', finalRows);
-    resetCommonFilters('final-filter');
-    el('final-filter-status').value = '';
+    finalQuickFilters.populate(finalRows);
+    finalQuickFilters.reset();
     el('final-filter-search').value = '';
     finalColumnFilters.clear();
     renderFinalTable();

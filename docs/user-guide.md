@@ -91,18 +91,29 @@ ones to keep, and press **OK**. The button turns amber while a column is filtere
 - **Clear filter** removes one column's filter; **Reset filters** removes everything.
 - This works on every column, including all the file's own columns in the final result.
 
-**Quick filters above the table.** Shortcuts for things a plain column list can't do:
+**Quick filters above the table.** Shortcuts, and the **multi-select** ones let you tick as many
+values as you like (click the button, tick, press **OK**; the button then reads `2 selected` or
+the single value you chose, and turns amber):
 
 | Filter | Notes |
 | --- | --- |
-| Workgroup | Lists each workgroup on its own. A combined label such as `Pack - Batch, Pack - Flow, Sort` is split, and picking `Sort` shows every row whose workgroup includes it. |
-| Day, Date | Date is the shift's start date. |
-| Start, End | **24-hour** times (`06:45`, `23:00`), listing only the times present in the file. |
-| Confidence (Match) / status (final) | Matched vs no source match. |
+| Workgroup (multi) | Lists each workgroup on its own. A combined label such as `Pack - Batch, Pack - Flow, Sort` is split, and a row matches if **any** of its workgroups is ticked. |
+| Day (multi) | Days of the week present in the file. |
+| Start time, End time (multi) | **24-hour** times (`06:45`, `23:00`), listing only the times present in the file. |
+| Confidence (Match) / Match status (final) (multi) | Matched vs no source match, or exact / near / far. |
+| Start date, End date (range) | Pick a **from** and/or **to** date. Use both to bound a range; use just one for "on or after" / "on or before". An overnight shift ends the next day, so its end date differs from its start date. |
 | Search | Matches any text in the row. |
+
+Ticking every value is the same as no filter (the button goes back to "All ...").
 
 Quick filters and column filters work together. In the final result, **whatever is left on screen
 is exactly what gets downloaded.**
+
+**Start / end as separate columns.** The Opportunities file keeps each start and end in a single
+date-time cell (`2026-09-27T23:45`). To make dates and times easy to filter, both tables also show
+**Start date, Start time, End date and End time** as separate columns. In the final result these
+four are review-only: they are **not** added to the downloaded file, which keeps exactly the
+original columns.
 
 ## 8. Apply & download
 
@@ -112,8 +123,8 @@ will be written, so you can check all the details before downloading.
 - **Yellow cells** are the values this tool changed (Headcount and Reason). Hover one to see
   what it was before.
 - **Red rows** had no source match and keep their original Headcount.
-- The three italic columns on the left (`#`, `Match`, `Source shift`) are for review only and are
-  **not** in the file.
+- The seven italic columns on the left (`#`, `Match`, `Source shift`, `Start date`, `Start time`,
+  `End date`, `End time`) are for review only and are **not** in the file.
 - Headcounts are whole numbers (`9`, not `9.0`), the same on screen and in the file.
 - **Hide columns that are empty in every row** tidies up files with many unused columns. The
   columns are always the file's own, so a file with more or fewer columns just shows more or fewer.

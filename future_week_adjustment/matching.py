@@ -60,7 +60,8 @@ def match_destination(loaded_destination, source_records):
             'workgroup': row['workgroup'],
             'workgroups': split_workgroups(row['workgroup']),
             'weekday': row['weekday'],
-            'date': row['start_dt'].date().isoformat() if row['start_dt'] else '',
+            'start_date': row['start_dt'].date().isoformat() if row['start_dt'] else '',
+            'end_date': row['end_dt'].date().isoformat() if row['end_dt'] else '',   # next day for overnight shifts
             'start_time': row['start_time'].strftime('%H:%M') if row['start_time'] else '',
             'end_time': row['end_time'].strftime('%H:%M') if row['end_time'] else '',
             'old_headcount': row['old_headcount'],

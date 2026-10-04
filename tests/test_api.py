@@ -2,7 +2,7 @@
 import pytest
 
 from conftest import (DEFAULT_OPPORTUNITIES, OPPORTUNITY_HEADERS, make_base_layer,
-                      make_opportunities_csv, make_opportunities_xlsx, read_csv, upload)
+                      make_opportunities_csv, make_opportunities_xlsx, opportunity, read_csv, upload)
 from future_week_adjustment import opportunities
 
 
@@ -51,8 +51,10 @@ def test_index_page_serves_static_assets(client):
 def test_filter_elements_exist_in_both_filter_bars(client):
     html = client.get("/").get_data(as_text=True)
     for prefix in ("filter", "final-filter"):
-        for name in ("workgroup", "day", "date", "start", "end"):
-            assert f'id="{prefix}-{name}"' in html
+        for name in ("workgroup", "day", "start", "end"):                  # multi-select buttons
+            assert f'<button type="button" class="multi-filter-btn" id="{prefix}-{name}"' in html
+        for name in ("start-date", "end-date"):                           # date ranges
+            assert f'id="{prefix}-{name}-from"' in html and f'id="{prefix}-{name}-to"' in html
 
 
 def test_match_results_and_confidence(loaded_client):
@@ -66,12 +68,31 @@ def test_match_results_and_confidence(loaded_client):
     assert by_key[("Outbound", "Sunday", "06:00")]["confidence"] == "no_source_match"
 
 
-def test_match_results_carry_date_and_individual_workgroups(loaded_client):
+def test_match_results_carry_start_and_end_dates_and_individual_workgroups(loaded_client):
     results = loaded_client.post("/api/match").get_json()["results"]
     sunday = next(r for r in results if r["weekday"] == "Sunday")
     monday = next(r for r in results if r["weekday"] == "Monday")
-    assert (sunday["date"], monday["date"]) == ("2026-09-27", "2026-09-28")
+    assert (sunday["start_date"], monday["start_date"]) == ("2026-09-27", "2026-09-28")
+    assert (sunday["end_date"], sunday["start_time"], sunday["end_time"]) == ("2026-09-27", "06:00", "16:00")
     assert sunday["workgroups"] == [sunday["workgroup"]]
+
+
+def test_overnight_shift_ends_on_the_next_date(client, tmp_path):
+    rows = [opportunity("Inbound", "Sunday", "22:00", "06:00", end_next_day=True),
+            opportunity("Inbound", "Sunday", "06:00", "16:00")]
+    src, dst = tmp_path / "base.xlsx", tmp_path / "opps.csv"
+    make_base_layer(src)
+    make_opportunities_csv(dst, rows)
+    upload(client, "/api/source", src)
+    upload(client, "/api/destination", dst)
+    results = client.post("/api/match").get_json()["results"]
+    overnight, same_day = results
+    assert (overnight["start_date"], overnight["end_date"]) == ("2026-09-27", "2026-09-28")
+    assert (same_day["start_date"], same_day["end_date"]) == ("2026-09-27", "2026-09-27")
+    preview(client)
+    final = final_rows(client)
+    assert (final[0]["start_date"], final[0]["end_date"], final[0]["start_time"], final[0]["end_time"]) \
+        == ("2026-09-27", "2026-09-28", "22:00", "06:00")
 
 
 def test_combined_workgroup_labels_are_split_for_filtering(client, tmp_path):

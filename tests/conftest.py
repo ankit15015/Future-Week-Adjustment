@@ -20,14 +20,16 @@ OPPORTUNITY_HEADERS = [
 ]
 
 
-def opportunity(workgroup, weekday, start, end, headcount="1", reason="", notes="keep me"):
-    """One Opportunities row. `start`/`end` are 'HH:MM'; the date is derived from `weekday`."""
+def opportunity(workgroup, weekday, start, end, headcount="1", reason="", notes="keep me", end_next_day=False):
+    """One Opportunities row. `start`/`end` are 'HH:MM'; the date is derived from `weekday`.
+    `end_next_day=True` makes an overnight shift that ends the following day."""
     assert SUNDAY.strftime("%A") == "Sunday"
     day = SUNDAY + dt.timedelta(days=WEEKDAYS.index(weekday))
+    end_day = day + dt.timedelta(days=1) if end_next_day else day
     return {
         "Workgroup(s)": workgroup,
         "Opportunity Start Date-Time": f"{day.isoformat()}T{start}",
-        "Opportunity End Date-Time": f"{day.isoformat()}T{end}",
+        "Opportunity End Date-Time": f"{end_day.isoformat()}T{end}",
         "Headcount": headcount,
         "Reason": reason,
         "Notes": notes,
