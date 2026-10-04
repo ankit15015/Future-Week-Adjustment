@@ -613,6 +613,8 @@ async function previewReasons() {
 el('reason-preview-btn').addEventListener('click', async () => {
   try {
     await previewReasons();
+    // The final-result table was built from the previous reasons; make the user regenerate it.
+    hideFinalResult();
   } catch (e) {
     alert('Error previewing reasons: ' + e.message);
   }
@@ -620,30 +622,91 @@ el('reason-preview-btn').addEventListener('click', async () => {
 
 // ---------------------------------------------------------------- export
 
-function isUnmatched(r) {
-  return r.new_headcount === null || r.new_headcount === undefined;
+// Final rows exactly as the server will write them (GET /api/final), and the subset left
+// after the filters below. The download contains the visible rows and nothing else.
+let finalRows = [];
+let finalVisible = [];
+
+function populateFinalFilterOptions() {
+  const workgroups = [...new Set(finalRows.map(r => r.workgroup))].sort();
+  const days = WEEKDAY_OPTIONS.filter(d => finalRows.some(r => r.weekday === d));
+  el('final-filter-workgroup').innerHTML = '<option value="">All workgroups</option>' +
+    workgroups.map(w => `<option value="${escapeAttr(w)}">${escapeHtml(w)}</option>`).join('');
+  el('final-filter-day').innerHTML = '<option value="">All days</option>' +
+    days.map(d => `<option value="${d}">${d}</option>`).join('');
+  el('final-filter-status').value = '';
+  el('final-filter-search').value = '';
+}
+
+function renderFinalTable() {
+  const wg = el('final-filter-workgroup').value;
+  const day = el('final-filter-day').value;
+  const status = el('final-filter-status').value;
+  const search = el('final-filter-search').value.trim().toLowerCase();
+  finalVisible = finalRows.filter(r => {
+    if (wg && r.workgroup !== wg) return false;
+    if (day && r.weekday !== day) return false;
+    if (status === 'updated' && !r.updated) return false;
+    if (status === 'unchanged' && r.updated) return false;
+    if (search) {
+      const haystack = `${r.workgroup} ${r.weekday || ''} ${r.start_time} ${r.end_time} ${r.reason}`.toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  });
+
+  document.querySelector('#export-preview-table tbody').innerHTML = finalVisible.map(r => `
+    <tr class="${r.updated ? '' : 'row-failed'}">
+      <td>${r.index + 1}</td>
+      <td>${escapeHtml(r.workgroup)}</td>
+      <td>${escapeHtml(r.weekday || '')}</td>
+      <td>${escapeHtml(r.start_time)}</td>
+      <td>${escapeHtml(r.end_time)}</td>
+      <td>${escapeHtml(r.headcount)}${r.updated ? '' : ' <small>(unchanged — no source match)</small>'}</td>
+      <td>${escapeHtml(r.reason)}</td>
+    </tr>
+  `).join('');
+
+  const shown = finalVisible.length, total = finalRows.length;
+  const filtered = shown < total;
+  el('final-filter-count').textContent = filtered ? `Showing ${shown} of ${total} row(s)` : `${total} row(s)`;
+  el('export-confirm-note').textContent = filtered
+    ? `Filters are on: the downloaded file will contain only these ${shown} of ${total} rows.`
+    : `This is exactly what will be written to the file (all ${total} rows). Check it, then confirm below.`;
+  el('export-confirm-btn').textContent = filtered ? `Confirm & download ${shown} filtered row(s)` : 'Confirm & download updated file';
+  el('export-confirm-btn').disabled = shown === 0;
+}
+
+['final-filter-workgroup', 'final-filter-day', 'final-filter-status'].forEach(id => {
+  el(id).addEventListener('change', renderFinalTable);
+});
+el('final-filter-search').addEventListener('input', renderFinalTable);
+el('final-filter-reset-btn').addEventListener('click', () => {
+  el('final-filter-workgroup').value = '';
+  el('final-filter-day').value = '';
+  el('final-filter-status').value = '';
+  el('final-filter-search').value = '';
+  renderFinalTable();
+});
+
+function hideFinalResult() {
+  el('export-review-wrap').classList.add('hidden');
+  setStatus(el('export-status'), '', '');
+  state.exportDone = false;
 }
 
 el('export-review-btn').addEventListener('click', async () => {
   el('export-review-btn').disabled = true;
   try {
-    const results = await previewReasons();
-    const total = results.length;
-    const unmatched = results.filter(isUnmatched).length;
-    const matched = total - unmatched;
+    await previewReasons();
+    finalRows = (await api('/api/final')).rows;
+    const total = finalRows.length;
+    const unmatched = finalRows.filter(r => !r.updated).length;
     el('export-review-text').textContent =
-      `${total} row(s) total — ${matched} will get an updated Headcount` +
+      `${total} row(s) total — ${total - unmatched} will get an updated Headcount` +
       (unmatched ? `, ${unmatched} have no source match and will keep their original Headcount (flagged below).` : '.');
-    const tbody = document.querySelector('#export-preview-table tbody');
-    tbody.innerHTML = results.map(r => `
-      <tr class="${isUnmatched(r) ? 'row-failed' : ''}">
-        <td>${r.index + 1}</td>
-        <td>${escapeHtml(r.workgroup)}</td>
-        <td>${escapeHtml(r.weekday || '')}</td>
-        <td>${isUnmatched(r) ? `(unchanged: ${escapeHtml(r.old_headcount)})` : r.new_headcount}</td>
-        <td>${escapeHtml(r.reason || '')}</td>
-      </tr>
-    `).join('');
+    populateFinalFilterOptions();
+    renderFinalTable();
     el('export-review-wrap').classList.remove('hidden');
     setStatus(el('export-status'), '', '');
   } catch (e) {
@@ -656,10 +719,14 @@ el('export-review-btn').addEventListener('click', async () => {
 el('export-confirm-btn').addEventListener('click', async () => {
   setStatus(el('export-status'), 'Writing updated file…');
   try {
-    const data = await api('/api/export', { method: 'POST' });
+    const data = await api('/api/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ indices: finalVisible.map(r => r.index) }),
+    });
     setStatus(
       el('export-status'),
-      `Done. Wrote ${data.rows_written} rows` +
+      `Done. Wrote ${data.rows_written}` + (data.filtered ? ` of ${data.rows_total}` : '') + ' rows' +
       (data.rows_unmatched ? ` (${data.rows_unmatched} rows had no source match — review those before sending).` : '.'),
       'ok'
     );
@@ -692,30 +759,27 @@ function enterStandardMode(modeKey) {
   updateStepRail();
 }
 
+// Mode picked on the mode-select screen; the gate and cap-notice buttons below
+// are wired once and read this, so going back and picking another mode can't
+// leave a stale handler behind.
+let pendingMode = null;
+
 function enterModeGate(mode) {
+  pendingMode = mode;
   hideAllScreens();
   el('mode-gate').classList.remove('hidden');
   el('gate-title').textContent = MODE_LABELS[mode] || mode;
-
-  const yesBtn = el('gate-yes-btn');
-  const noBtn = el('gate-no-btn');
-  const onYes = () => { enterStandardMode(mode); cleanup(); };
-  const onNo = () => { enterCapNotice(mode); cleanup(); };
-  function cleanup() {
-    yesBtn.removeEventListener('click', onYes);
-    noBtn.removeEventListener('click', onNo);
-  }
-  yesBtn.addEventListener('click', onYes);
-  noBtn.addEventListener('click', onNo);
 }
 
-function enterCapNotice(mode) {
+function enterCapNotice() {
   hideAllScreens();
   el('cap-notice').classList.remove('hidden');
-  const continueBtn = el('cap-notice-continue-btn');
-  const onContinue = () => { enterStandardMode(mode); continueBtn.removeEventListener('click', onContinue); };
-  continueBtn.addEventListener('click', onContinue);
 }
+
+// "Do you want to adjust max cap?" — Yes shows the settings link first, No goes straight on.
+el('gate-yes-btn').addEventListener('click', () => enterCapNotice());
+el('gate-no-btn').addEventListener('click', () => enterStandardMode(pendingMode));
+el('cap-notice-continue-btn').addEventListener('click', () => enterStandardMode(pendingMode));
 
 document.querySelectorAll('.mode-card').forEach(card => {
   card.addEventListener('click', () => {

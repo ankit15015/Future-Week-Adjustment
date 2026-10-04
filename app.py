@@ -259,34 +259,80 @@ def api_reasons_preview():
     return jsonify({'results': results})
 
 
+def build_final_rows(results):
+    """
+    Single source of truth for the final result. Returns (rows, updates):
+      rows    - what the "Apply & download" table shows, i.e. the value each row will
+                hold in the downloaded file.
+      updates - the cell changes written to the file (None = leave the original cell alone).
+    A row with no source match keeps its original Headcount, and a blank reason keeps the
+    original Reason cell, so `rows` shows those originals rather than a blank.
+    """
+    rows = []
+    updates = {}
+    for r in results:
+        new_headcount = r['new_headcount']
+        new_reason = r.get('reason') or None
+        updates[r['index']] = {'headcount': new_headcount, 'reason': new_reason}
+        rows.append({
+            'index': r['index'],
+            'workgroup': r['workgroup'],
+            'weekday': r['weekday'],
+            'start_time': r['start_time'],
+            'end_time': r['end_time'],
+            'headcount': new_headcount if new_headcount is not None else r['old_headcount'],
+            'updated': new_headcount is not None,
+            'reason': new_reason if new_reason is not None else r['old_reason'],
+        })
+    return rows, updates
+
+
+@app.route('/api/final')
+def api_final():
+    sdata = get_session()
+    if 'reasoned_results' not in sdata:
+        abort(400, description="Preview reasons first.")
+    rows, _ = build_final_rows(sdata['reasoned_results'])
+    return jsonify({'rows': rows})
+
+
 @app.route('/api/export', methods=['POST'])
 def api_export():
     sdata = get_session()
     if 'reasoned_results' not in sdata:
         abort(400, description="Preview reasons before exporting.")
     loaded = sdata['destination']
-    results = sdata['reasoned_results']
+    rows, updates = build_final_rows(sdata['reasoned_results'])
 
-    updates = {}
-    for r in results:
-        headcount = r['new_headcount'] if r['new_headcount'] is not None else None
-        updates[r['index']] = {
-            'headcount': headcount,
-            'reason': r.get('reason') or None,
-        }
+    # The page sends the row indices it is currently showing (after any filters), so the
+    # file holds exactly the rows on screen. No body = every row.
+    body = request.get_json(silent=True) or {}
+    keep = None
+    if body.get('indices') is not None:
+        try:
+            keep = {int(i) for i in body['indices']}
+        except (TypeError, ValueError):
+            abort(400, description="indices must be a list of row numbers.")
+        if not keep:
+            abort(400, description="No rows selected — your filters match nothing.")
+        if not keep <= updates.keys():
+            abort(400, description="Unknown row in selection — run the match again.")
+    filtered = keep is not None and len(keep) < len(rows)
 
     orig_name = sdata.get('destination_filename', 'destination')
     stem, ext = os.path.splitext(orig_name)
-    out_name = f"{stem} - Updated{ext}"
+    out_name = f"{stem} - Updated{' (filtered)' if filtered else ''}{ext}"
     out_path = os.path.join(OUTPUT_DIR, out_name)
-    destination.write_destination(loaded, updates, out_path)
+    destination.write_destination(loaded, updates, out_path, keep=keep)
 
-    unmatched = sum(1 for r in results if r['new_headcount'] is None)
+    written = [r for r in rows if keep is None or r['index'] in keep]
     return jsonify({
         'download_url': f"/api/download/{out_name}",
         'filename': out_name,
-        'rows_written': len(results),
-        'rows_unmatched': unmatched,
+        'rows_written': len(written),
+        'rows_total': len(rows),
+        'rows_unmatched': sum(1 for r in written if not r['updated']),
+        'filtered': filtered,
     })
 
 

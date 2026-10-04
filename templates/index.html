@@ -46,10 +46,10 @@
   <main class="placeholder-main">
     <section class="card placeholder-card">
       <h2 id="gate-title"></h2>
-      <p>Do you want to opt out of reducing hours cap?</p>
+      <p>Do you want to adjust max cap?</p>
       <div class="gate-actions">
-        <button id="gate-yes-btn" class="primary">Yes &mdash; opt out</button>
-        <button id="gate-no-btn" class="secondary">No &mdash; keep the cap reduction</button>
+        <button id="gate-yes-btn" class="primary">Yes</button>
+        <button id="gate-no-btn" class="secondary">No</button>
       </div>
     </section>
   </main>
@@ -65,7 +65,7 @@
   <main class="placeholder-main">
     <section class="card placeholder-card">
       <h2>Adjust your max cap setting</h2>
-      <p>You chose to keep the hours-cap reduction, so adjust the max cap setting in Amazon Scheduling before continuing here.</p>
+      <p>Adjust the max cap setting in Amazon Scheduling, then continue here.</p>
       <div class="gate-actions">
         <a href="https://scheduling.amazon.com/#/site-settings-edit" target="_blank" rel="noopener noreferrer" class="cap-link">Open site settings &rarr;</a>
         <button id="cap-notice-continue-btn" class="secondary">Continue to Source &amp; Destination &rarr;</button>
@@ -223,15 +223,27 @@
       <button id="export-review-btn" class="primary" disabled>Show final result</button>
       <div id="export-review-wrap" class="hidden">
         <p class="summary-line" id="export-review-text"></p>
+        <div class="filter-bar">
+          <select id="final-filter-workgroup"><option value="">All workgroups</option></select>
+          <select id="final-filter-day"><option value="">All days</option></select>
+          <select id="final-filter-status">
+            <option value="">All rows</option>
+            <option value="updated">Updated headcount</option>
+            <option value="unchanged">Unchanged (no source match)</option>
+          </select>
+          <input type="text" id="final-filter-search" placeholder="Search workgroup, time, or reason&hellip;">
+          <button id="final-filter-reset-btn" class="secondary small">Reset filters</button>
+          <span id="final-filter-count" class="filter-count"></span>
+        </div>
         <div class="table-wrap">
           <table id="export-preview-table">
             <thead>
-              <tr><th>#</th><th>Workgroup</th><th>Day</th><th>New Headcount</th><th>Reason</th></tr>
+              <tr><th>#</th><th>Workgroup</th><th>Day</th><th>Start</th><th>End</th><th>New Headcount</th><th>Reason</th></tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
-        <p class="export-confirm-note">This is exactly what will be written to the file. Check it, then confirm below.</p>
+        <p class="export-confirm-note" id="export-confirm-note"></p>
         <button id="export-confirm-btn" class="primary">Confirm &amp; download updated file</button>
       </div>
       <div id="export-status" class="status"></div>

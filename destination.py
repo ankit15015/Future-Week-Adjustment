@@ -51,7 +51,8 @@ def _load_xlsx(path):
         raise ValueError("Destination workbook's first sheet is empty")
     fieldnames = [str(h).strip() if h is not None else '' for h in all_rows[0]]
     rows = []
-    for r in all_rows[1:]:
+    sheet_rows = []
+    for sheet_row, r in enumerate(all_rows[1:], start=2):
         if all(v is None or v == '' for v in r):
             continue
         row = {}
@@ -59,10 +60,12 @@ def _load_xlsx(path):
             v = r[i] if i < len(r) else None
             row[fn] = '' if v is None else v
         rows.append(row)
-    return _build_result(fieldnames, rows, ext='.xlsx', sheet_name=wb.sheetnames[0], source_path=path)
+        sheet_rows.append(sheet_row)
+    return _build_result(fieldnames, rows, ext='.xlsx', sheet_name=wb.sheetnames[0], source_path=path,
+                         sheet_rows=sheet_rows)
 
 
-def _build_result(fieldnames, rows, ext, sheet_name=None, source_path=None):
+def _build_result(fieldnames, rows, ext, sheet_name=None, source_path=None, sheet_rows=None):
     hc_header = _find_header(fieldnames, HEADCOUNT_HEADER)
     reason_header = _find_header(fieldnames, REASON_HEADER)
     wg_header = _find_header(fieldnames, WORKGROUP_HEADER) or _find_header(fieldnames, 'Workgroup')
@@ -83,6 +86,8 @@ def _build_result(fieldnames, rows, ext, sheet_name=None, source_path=None):
         end_dt = _parse_datetime(end_raw) if end_raw else None
         parsed_rows.append({
             'index': i,
+            # Actual worksheet row (xlsx only): blank rows are skipped on load, so index + 2 can drift.
+            'sheet_row': sheet_rows[i] if sheet_rows else i + 2,
             'raw': row,
             'workgroup': str(row.get(wg_header, '')).strip(),
             'start_dt': start_dt,
@@ -127,27 +132,32 @@ def _parse_datetime(raw):
         return None
 
 
-def write_destination(loaded, updates, out_path):
+def write_destination(loaded, updates, out_path, keep=None):
     """
     updates: dict {row_index: {'headcount': value_or_None, 'reason': value_or_None}}
     Only cells present (and not None) in `updates` are changed; everything else in
     the original file is left exactly as it was.
+
+    keep: optional set of row indices. When given, only those rows are written to the
+    output file (the header row is always kept); None writes every row.
     """
     hc_header = loaded['headers']['headcount']
     reason_header = loaded['headers']['reason']
 
     if loaded['ext'] == '.csv':
-        _write_csv(loaded, updates, out_path, hc_header, reason_header)
+        _write_csv(loaded, updates, out_path, hc_header, reason_header, keep)
     else:
-        _write_xlsx(loaded, updates, out_path, hc_header, reason_header)
+        _write_xlsx(loaded, updates, out_path, hc_header, reason_header, keep)
 
 
-def _write_csv(loaded, updates, out_path, hc_header, reason_header):
+def _write_csv(loaded, updates, out_path, hc_header, reason_header, keep=None):
     fieldnames = loaded['fieldnames']
     with open(out_path, 'w', encoding='utf-8-sig', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         for parsed_row in loaded['rows']:
+            if keep is not None and parsed_row['index'] not in keep:
+                continue
             row = dict(parsed_row['raw'])
             upd = updates.get(parsed_row['index'], {})
             if upd.get('headcount') is not None:
@@ -157,7 +167,7 @@ def _write_csv(loaded, updates, out_path, hc_header, reason_header):
             writer.writerow(row)
 
 
-def _write_xlsx(loaded, updates, out_path, hc_header, reason_header):
+def _write_xlsx(loaded, updates, out_path, hc_header, reason_header, keep=None):
     import openpyxl
     wb = openpyxl.load_workbook(loaded['_source_path'])
     ws = wb[loaded['sheet_name']]
@@ -170,10 +180,16 @@ def _write_xlsx(loaded, updates, out_path, hc_header, reason_header):
     reason_col = col_by_header.get(reason_header)
 
     for parsed_row in loaded['rows']:
-        sheet_row = parsed_row['index'] + 2  # +1 header, +1 to move to 1-indexed data row
+        sheet_row = parsed_row['sheet_row']
         upd = updates.get(parsed_row['index'], {})
         if upd.get('headcount') is not None and hc_col:
             ws.cell(row=sheet_row, column=hc_col, value=upd['headcount'])
         if upd.get('reason') is not None and reason_col:
             ws.cell(row=sheet_row, column=reason_col, value=upd['reason'])
+
+    if keep is not None:
+        # Bottom-up so earlier deletions don't shift the rows still to be removed.
+        drop = [p['sheet_row'] for p in loaded['rows'] if p['index'] not in keep]
+        for sheet_row in sorted(drop, reverse=True):
+            ws.delete_rows(sheet_row)
     wb.save(out_path)
