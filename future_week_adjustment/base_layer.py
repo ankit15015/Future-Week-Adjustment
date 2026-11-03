@@ -90,6 +90,32 @@ def grid_from_openpyxl(ws):
     return grid
 
 
+def grid_from_csv(path):
+    """A Base Layer saved as CSV: same grid shape, cell values are text (blank cells skipped)."""
+    import csv
+    grid = {}
+    with open(path, encoding='utf-8-sig', newline='') as f:
+        for r, row in enumerate(csv.reader(f), start=1):
+            for c, v in enumerate(row, start=1):
+                v = v.strip()
+                if v != '':
+                    grid.setdefault(r, []).append((c, v))
+    return grid
+
+
+SITE_TITLE_RE = re.compile(r'^\s*([A-Za-z0-9]{2,8})\s+FC\s+Ready\s+Base\s*Layer\s*$', re.I)
+
+
+def _site_above(grid, header_row, previous_header_row, lookback=4):
+    """Site code from the nearest '<SITE> FC Ready Base Layer' title above a block header ('' if none)."""
+    for rr in range(header_row - 1, max(header_row - lookback, previous_header_row, 0), -1):
+        for _, v in grid.get(rr, []):
+            m = isinstance(v, str) and SITE_TITLE_RE.match(v)
+            if m:
+                return m.group(1).upper()
+    return ''
+
+
 def grid_from_pyxlsb(sheet):
     grid = {}
     for row in sheet.rows():
@@ -151,7 +177,7 @@ def _duration_hours(start_t, end_t):
     return diff / 60.0
 
 
-def parse_blocks_from_grid(grid):
+def parse_blocks_from_grid(grid, site=None, sites_out=None):
     """Generic 'Shift / Start Time / End Time' block parser shared by all spreadsheet layouts."""
     if not grid:
         return [], [], {}, {}
@@ -185,7 +211,14 @@ def parse_blocks_from_grid(grid):
         header_rows.append((r, shift_col, start_col, end_col))
 
     last_weekday_by_col = None
+    previous_hr = 0
     for (hr, shift_col, start_col, end_col) in header_rows:
+        block_site = _site_above(grid, hr, previous_hr)
+        previous_hr = hr
+        if sites_out is not None and block_site:
+            sites_out.add(block_site)
+        if site and block_site != site:
+            continue
         header_vals = dict(grid[hr])
         weekday_by_col = {}
         for probe in range(hr - 1, max(hr - 4, 0), -1):
@@ -254,6 +287,7 @@ def parse_blocks_from_grid(grid):
                 if is_early_tail:
                     weekday = WEEKDAYS[(WEEKDAYS.index(weekday) + 1) % 7]
                 records.append({
+                    'site': block_site,
                     'workgroup': workgroup_by_col[col],
                     'weekday': weekday,
                     'shift_name': shift_name,
@@ -272,7 +306,7 @@ def parse_blocks_from_grid(grid):
     return records, warnings, minimum_hours_by_workgroup, total_hours_by_workgroup
 
 
-def parse_spreadsheet_source(path):
+def parse_spreadsheet_source(path, site=None, sites_out=None):
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.xlsx', '.xlsm'):
         import openpyxl
@@ -281,7 +315,7 @@ def parse_spreadsheet_source(path):
         for sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             grid = grid_from_openpyxl(ws)
-            recs, warns, min_hours, total_hours = parse_blocks_from_grid(grid)
+            recs, warns, min_hours, total_hours = parse_blocks_from_grid(grid, site, sites_out)
             all_records.extend(recs)
             all_warnings.extend(f"[{sheet_name}] {w}" for w in warns)
             all_min_hours.update(min_hours)
@@ -298,13 +332,15 @@ def parse_spreadsheet_source(path):
             for sn in candidates:
                 with wb.get_sheet(sn) as sheet:
                     grid = grid_from_pyxlsb(sheet)
-                recs, warns, min_hours, total_hours = parse_blocks_from_grid(grid)
+                recs, warns, min_hours, total_hours = parse_blocks_from_grid(grid, site, sites_out)
                 if recs:
                     all_records.extend(recs)
                     all_warnings.extend(f"[{sn}] {w}" for w in warns)
                     all_min_hours.update(min_hours)
                     all_total_hours.update(total_hours)
         return all_records, all_warnings, all_min_hours, all_total_hours
+    elif ext == '.csv':
+        return parse_blocks_from_grid(grid_from_csv(path), site, sites_out)
     else:
         raise ValueError(f"Unsupported spreadsheet type: {ext}")
 
@@ -490,7 +526,25 @@ def parse_image_source(path):
         return parse_image_grid(result)
 
 
-def parse_source(path):
+def list_sites(path):
+    """Site codes found in a spreadsheet/CSV Base Layer (empty if its blocks carry no site title)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in ('.xlsx', '.xlsm', '.xlsb', '.csv'):
+        return []
+    sites = set()
+    parse_spreadsheet_source(path, sites_out=sites)
+    return sorted(sites)
+
+
+def looks_like_base_layer(path):
+    """True if a spreadsheet/CSV has Base Layer blocks (Shift / Start Time / End Time headers)."""
+    try:
+        return bool(parse_spreadsheet_source(path)[0])
+    except Exception:
+        return False
+
+
+def parse_source(path, site=None):
     """Dispatch to the right parser based on file extension.
 
     Always returns (records, warnings, minimum_hours_by_workgroup,
@@ -498,8 +552,8 @@ def parse_source(path):
     those summary figures, so it always comes back with empty dicts there.
     """
     ext = os.path.splitext(path)[1].lower()
-    if ext in ('.xlsx', '.xlsm', '.xlsb'):
-        return parse_spreadsheet_source(path)
+    if ext in ('.xlsx', '.xlsm', '.xlsb', '.csv'):
+        return parse_spreadsheet_source(path, site)
     elif ext in ('.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp'):
         records, warnings = parse_image_source(path)
         return records, warnings, {}, {}

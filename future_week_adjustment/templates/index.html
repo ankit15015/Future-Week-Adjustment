@@ -202,18 +202,13 @@
     </section>
 
     <section class="card" id="step-reason">
-      <h2>Reason <span class="h2-sub">Column L &mdash; you type this in</span></h2>
-      <div class="group-toggle">
-        Group reasons by:
-        <label><input type="radio" name="group-by" value="workgroup" checked> Workgroup</label>
-        <label><input type="radio" name="group-by" value="shift_type"> Shift type (start&ndash;end time)</label>
-      </div>
-      <div id="reason-groups"></div>
+      <h2>Reason <span class="h2-sub">Reason column &mdash; you type this in</span></h2>
+      <div id="reason-groups" hidden></div>
       <div class="default-reason-row">
-        <label for="default-reason">Default / fallback reason (used for anything not covered above):</label>
+        <label for="default-reason">Reason (applied to every row):</label>
         <input type="text" id="default-reason" placeholder="e.g. Weekly baselayer alignment">
       </div>
-      <button id="reason-preview-btn" class="secondary">Preview reasons in table above</button>
+      <button id="reason-preview-btn" class="secondary">Preview reason in table above</button>
     </section>
 
     <section class="card" id="step-export">

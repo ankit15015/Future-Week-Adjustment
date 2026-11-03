@@ -263,3 +263,38 @@ def test_download_serves_the_generated_file(loaded_client):
     j = loaded_client.post("/api/export").get_json()
     resp = loaded_client.get(j["download_url"])
     assert resp.status_code == 200 and "attachment" in resp.headers["Content-Disposition"]
+
+
+# ---- multi-site CSV Base Layer ----
+
+def _multi_site_csv(path):
+    """Two sites' blocks in one CSV, each under a '<SITE> FC Ready Base Layer' title."""
+    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    lines = []
+    for site, wg, hc in (("AAA1", "Inbound", 5), ("BBB2", "Pick", 9)):
+        lines.append(f",{site} FC Ready Base Layer," + "," * 8)
+        lines.append("," * 4 + ",".join(days))
+        lines.append(",Shift,Start Time,End Time," + ",".join([wg] * 7))
+        lines.append(",Day,07:00,12:20," + ",".join([str(hc)] * 7))
+        lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8-sig")
+
+
+def test_csv_base_layer_with_several_sites_asks_for_a_site(client, tmp_path):
+    src = tmp_path / "multi.csv"
+    _multi_site_csv(src)
+    first = upload(client, "/api/source", src).get_json()
+    assert first["needs_site"] is True and first["sites"] == ["AAA1", "BBB2"]
+
+    data = {"file": (__import__("io").BytesIO(src.read_bytes()), src.name), "site": "bbb2"}
+    r = client.post("/api/source", data=data, content_type="multipart/form-data").get_json()
+    assert r["site"] == "BBB2" and r["record_count"] == 7
+    assert {x["workgroup"] for x in r["records"]} == {"Pick"} and r["records"][0]["headcount"] == 9
+
+
+def test_loading_a_base_layer_as_destination_explains_itself(client, tmp_path):
+    src = tmp_path / "base.xlsx"
+    make_base_layer(src)
+    upload(client, "/api/source", src)
+    r = upload(client, "/api/destination", src)
+    assert r.status_code == 400 and "load it under Source" in r.get_json()["description"]

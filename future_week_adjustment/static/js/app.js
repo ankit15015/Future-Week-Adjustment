@@ -31,10 +31,12 @@ function updateStepRail() {
     const li = document.querySelector(`.rail-step[data-rail="${s.key}"]`);
     if (!li) return;
     li.classList.remove('is-done', 'is-current', 'is-skipped');
+    li.hidden = false;
     const existingNote = li.querySelector('.rail-note');
     if (existingNote) existingNote.remove();
     if (s.skipped) {
       li.classList.add('is-skipped');
+      li.hidden = true;   // steps that don't apply to this source are not shown
       const note = document.createElement('span');
       note.className = 'rail-note';
       note.textContent = 'not needed here';
@@ -92,19 +94,37 @@ function roundClean(n) {
 
 // ---------------------------------------------------------------- source
 
+// A Base Layer file can hold many sites; ask which one this run is for, then load just that one.
+function askForSite(formData, data) {
+  setStatus(el('source-status'), `"${data.filename}" has ${data.sites.length} sites. Choose the site to load: `, '');
+  const select = document.createElement('select');
+  select.innerHTML = '<option value="">Select site…</option>' +
+    data.sites.map(s => `<option value="${escapeAttr(s)}">${escapeHtml(s)}</option>`).join('');
+  select.addEventListener('change', () => {
+    if (!select.value) return;
+    formData.set('site', select.value);
+    submitSource(formData);
+  });
+  el('source-status').appendChild(select);
+}
+
 async function submitSource(formData) {
   setStatus(el('source-status'), 'Reading source file…');
   el('source-table-wrap').classList.add('hidden');
   el('source-warnings').innerHTML = '';
   try {
     const data = await api('/api/source', { method: 'POST', body: formData });
+    if (data.needs_site) {
+      askForSite(formData, data);
+      return;
+    }
     state.sourceRecords = data.records;
     state.minimumHours = data.minimum_hours || {};
     state.destLoaded = false;
     state.matchResults = [];
     state.reasonedResults = [];
     state.exportDone = false;
-    setStatus(el('source-status'), `Loaded "${data.filename}" (${data.kind}) — ${data.record_count} shift/day/workgroup cells found.`, 'ok');
+    setStatus(el('source-status'), `Loaded "${data.filename}"${data.site ? ` for site ${data.site}` : ''} (${data.kind}) — ${data.record_count} shift/day/workgroup cells found.`, 'ok');
     if (data.warnings && data.warnings.length) {
       el('source-warnings').innerHTML = data.warnings.map(w => `<div>${escapeHtml(w)}</div>`).join('');
     }
@@ -907,24 +927,12 @@ el('filter-reset-btn').addEventListener('click', () => {
 
 // ---------------------------------------------------------------- reasons
 
+// Only the single default reason is used for now (no per-group reasons), so grouping is moot.
 function currentGroupBy() {
-  return document.querySelector('input[name="group-by"]:checked').value;
+  return 'workgroup';
 }
 
-function renderReasonGroups() {
-  const groupBy = currentGroupBy();
-  const groups = state.groups[groupBy] || [];
-  el('reason-groups').innerHTML = groups.map(g => `
-    <div class="reason-group-item">
-      <div class="grp-label"><span>${escapeHtml(g.key)}</span><span class="grp-count">${g.count} row(s)</span></div>
-      <input type="text" data-key="${escapeAttr(g.key)}" placeholder="Reason for this group">
-    </div>
-  `).join('');
-}
-
-document.querySelectorAll('input[name="group-by"]').forEach(radio => {
-  radio.addEventListener('change', renderReasonGroups);
-});
+function renderReasonGroups() {}
 
 async function previewReasons() {
   const groupBy = currentGroupBy();

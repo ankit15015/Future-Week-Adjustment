@@ -27,7 +27,7 @@ OUTPUT_DIR = os.path.join(INSTANCE_DIR, 'output')
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-SOURCE_EXTS = {'.xlsx', '.xlsm', '.xlsb', '.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp'}
+SOURCE_EXTS = {'.xlsx', '.xlsm', '.xlsb', '.csv', '.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp'}
 DEST_EXTS = {'.csv', '.xlsx', '.xlsm'}
 
 app = Flask(__name__)
@@ -121,10 +121,23 @@ def api_source():
     ext = os.path.splitext(path)[1].lower()
     if ext not in SOURCE_EXTS:
         abort(400, description=f"Unsupported source file type: {ext}")
+    site = (request.form.get('site') or '').strip().upper() or None
     try:
-        records, warnings, minimum_hours, total_hours = base_layer.parse_source(path)
+        sites = base_layer.list_sites(path)
+        if len(sites) > 1 and site is None:
+            # One file holds several sites' Base Layers: the user must say which one this run is for.
+            return jsonify({'needs_site': True, 'sites': sites, 'filename': orig_name})
+        if site and sites and site not in sites:
+            abort(400, description=f"Site {site} is not in this file.")
+        if len(sites) == 1:
+            site = sites[0]
+        records, warnings, minimum_hours, total_hours = base_layer.parse_source(path, site)
+    except HTTPException:
+        raise
     except Exception as e:
         abort(400, description=f"Could not read source file: {e}")
+    if not records and site:
+        abort(400, description=f"No Base Layer data found for site {site}.")
 
     sdata = get_session()
     sdata['source_records'] = records
@@ -138,6 +151,7 @@ def api_source():
     workgroups = sorted(set(r['workgroup'] for r in records))
     return jsonify({
         'filename': orig_name,
+        'site': site or '',
         'kind': sdata['source_kind'],
         'records': records,
         'warnings': warnings,
@@ -212,7 +226,8 @@ def api_destination():
     try:
         loaded = opportunities.load_destination(path)
     except Exception as e:
-        abort(400, description=f"Could not read destination file: {e}")
+        hint = " This looks like a Base Layer - load it under Source instead." if 'missing expected column' in str(e) and base_layer.looks_like_base_layer(path) else ""
+        abort(400, description=f"Could not read destination file: {e}{hint}")
 
     sdata['destination'] = loaded
     sdata['destination_filename'] = orig_name

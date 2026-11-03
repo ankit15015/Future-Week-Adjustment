@@ -677,3 +677,5 @@ td input:focus { border-color: var(--accent); background: white; }
   .rail ol::before { display: none; }
   .rail-step { padding-left: 20px; }
 }
+
+.rail-step[hidden] { display: none; }
