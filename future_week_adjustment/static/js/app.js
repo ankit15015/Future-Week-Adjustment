@@ -133,6 +133,7 @@ async function submitSource(formData) {
     el('source-table-wrap').classList.remove('hidden');
     el('match-table-wrap').classList.add('hidden');
     el('match-summary').innerHTML = '';
+    setupManualMinHours(data);
     setupMinHoursStep();
     setupOnePercentStep(data.one_percent_rule || []);
     updateMatchButtonState();
@@ -232,6 +233,66 @@ function refreshDestinationLock() {
 }
 
 // ---------------------------------------------------------------- minimum hours
+
+// Source files that state no Minimum Hours: let the user enter them per workgroup.
+function setupManualMinHours(data) {
+  const card = el('step-min-hours-manual');
+  state.minHoursManual = !data.minimum_hours_from_file && data.records.length > 0;
+  card.classList.toggle('hidden', !state.minHoursManual);
+  el('min-hours-manual-status').textContent = '';
+  if (!state.minHoursManual) return;
+  const workgroups = [...new Set(data.records.map(r => r.workgroup))];
+  el('min-hours-manual-groups').innerHTML = workgroups.map(wg => `
+    <div class="min-hours-item" data-workgroup="${escapeAttr(wg)}">
+      <div class="mh-label">${escapeHtml(wg)}</div>
+      <input type="number" step="any" min="0" placeholder="Minimum hours (optional)">
+    </div>`).join('');
+}
+
+el('min-hours-manual-btn').addEventListener('click', async () => {
+  const hours = {};
+  document.querySelectorAll('#min-hours-manual-groups .min-hours-item').forEach(item => {
+    hours[item.dataset.workgroup] = item.querySelector('input').value;
+  });
+  try {
+    await persistSourceRecords();
+    const data = await api('/api/minimum-hours/set', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hours }),
+    });
+    state.minimumHours = data.minimum_hours;
+    state.matchResults = [];
+    state.reasonedResults = [];
+    state.exportDone = false;
+    el('match-table-wrap').classList.add('hidden');
+    el('match-summary').innerHTML = '';
+    el('one-percent-downloads').textContent = '';
+    el('min-hours-downloads').textContent = '';
+    el('match-min-hours-result').textContent = '';
+    setupMinHoursStep();
+    document.querySelectorAll('#min-hours-groups .min-hours-item').forEach(item => {
+      const v = data.minimum_hours[item.dataset.workgroup];
+      if (v !== undefined) item.querySelector('input').value = v;
+    });
+    if (Object.keys(data.minimum_hours).length) await runMinHoursValidation();
+    setupOnePercentStep(data.one_percent_rule || []);
+    updateMatchButtonState();
+    updateStepRail();
+    setStatus(el('min-hours-manual-status'),
+      Object.keys(data.minimum_hours).length
+        ? `Minimum hours set for ${Object.keys(data.minimum_hours).length} workgroup(s). The 1% rule and Match minimum hours are now on.`
+        : 'No minimum hours entered - the 1% rule and Match minimum hours stay off.', 'ok');
+    if (data.warnings && data.warnings.length) {
+      const warn = document.createElement('div');
+      warn.className = 'mh-result short';
+      warn.innerHTML = data.warnings.map(w => `&#9888; ${escapeHtml(w)}`).join('<br>');
+      el('min-hours-manual-status').appendChild(warn);
+    }
+  } catch (e) {
+    setStatus(el('min-hours-manual-status'), 'Error: ' + e.message, 'error');
+  }
+});
 
 function setupMinHoursStep() {
   const workgroups = Object.keys(state.minimumHours);

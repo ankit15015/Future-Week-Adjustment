@@ -369,3 +369,56 @@ def test_source_download_after_each_fix(client, tmp_path):
     assert sunday_day_headcount(sheet("one_percent")) == 3          # 1 lifted to the 1% baseline
     assert sunday_day_headcount(sheet("min_hours")) != 3 or True
     assert sheet("current") is not None
+
+
+# ---- Minimum hours entered by hand (source files that do not state them) ----
+
+def test_minimum_hours_can_be_entered_when_the_file_has_none(client, tmp_path):
+    src = tmp_path / "base.xlsx"
+    make_base_layer(src)                                  # no Minimum Hours in this file
+    loaded = upload(client, "/api/source", src).get_json()
+    assert loaded["minimum_hours_from_file"] is False and loaded["one_percent_rule"] == []
+    assert client.post("/api/source/one-percent-fix").status_code == 400    # nothing to fix yet
+
+    r = client.post("/api/minimum-hours/set", json={"hours": {"Inbound": 3000}}).get_json()
+    assert r["minimum_hours"] == {"Inbound": 3000.0} and len(r["one_percent_rule"]) == 14
+
+    s = client.post("/api/source/match-minimum-hours").get_json()["summary"][0]      # now available
+    assert s["target"] == 3000
+    assert client.get("/api/source/download?stage=min_hours").status_code == 200
+
+    cleared = client.post("/api/minimum-hours/set", json={"hours": {"Inbound": ""}}).get_json()
+    assert cleared["minimum_hours"] == {} and cleared["one_percent_rule"] == []
+
+
+def test_manual_minimum_hours_unlocks_the_destination_without_another_confirmation(client, tmp_path):
+    src, dst = tmp_path / "base.xlsx", tmp_path / "opps.csv"
+    make_base_layer(src, headcount_overrides={("Day", "Sunday"): 1})
+    make_opportunities_csv(dst)
+    upload(client, "/api/source", src)
+    client.post("/api/minimum-hours/set", json={"hours": {"Inbound": 3000}})
+    # Sunday Day = 1 is below the new 1% baseline (3): fix it, then the destination loads
+    assert upload(client, "/api/destination", dst).status_code == 400
+    client.post("/api/source/one-percent-fix")
+    assert upload(client, "/api/destination", dst).status_code == 200
+
+
+def test_manual_minimum_hours_rejects_bad_input(client, tmp_path):
+    src = tmp_path / "base.xlsx"
+    make_base_layer(src)
+    upload(client, "/api/source", src)
+    for hours in ({"Nowhere": 5}, {"Inbound": "abc"}, {"Inbound": -3}, {"Inbound": 0}):
+        assert client.post("/api/minimum-hours/set", json={"hours": hours}).status_code == 400
+
+
+def test_manual_minimum_hours_warns_when_the_number_looks_wrong(client, tmp_path):
+    src = tmp_path / "base.xlsx"
+    make_base_layer(src)                       # plans roughly 1,900 hours for Inbound
+    upload(client, "/api/source", src)
+    sensible = client.post("/api/minimum-hours/set", json={"hours": {"Inbound": 1500}}).get_json()
+    assert sensible["warnings"] == []
+    too_high = client.post("/api/minimum-hours/set", json={"hours": {"Inbound": 150000}}).get_json()
+    assert len(too_high["warnings"]) == 1 and "RAISE" in too_high["warnings"][0]
+    too_low = client.post("/api/minimum-hours/set", json={"hours": {"Inbound": 15}}).get_json()
+    assert len(too_low["warnings"]) == 1 and "under 10%" in too_low["warnings"][0]
+    assert too_low["minimum_hours"] == {"Inbound": 15.0}        # still accepted: it is a warning, not an error

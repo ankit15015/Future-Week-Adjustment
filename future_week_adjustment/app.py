@@ -162,6 +162,7 @@ def api_source():
         'workgroups': workgroups,
         'record_count': len(records),
         'minimum_hours': minimum_hours,
+        'minimum_hours_from_file': bool(minimum_hours),
         'one_percent_rule': one_percent_results,
     })
 
@@ -237,6 +238,52 @@ def api_source_download():
     name = secure_filename(f"{stem}{' - ' + site if site and site not in stem else ''} - {STAGE_LABELS[stage]}.xlsx")
     base_layer.write_base_layer_xlsx(records, sdata.get('minimum_hours', {}), os.path.join(OUTPUT_DIR, name), site)
     return send_from_directory(OUTPUT_DIR, name, as_attachment=True)
+
+
+@app.route('/api/minimum-hours/set', methods=['POST'])
+def api_minimum_hours_set():
+    """
+    For a source file that does not state Minimum Hours: the user supplies them per workgroup.
+    This switches on the minimum-hours check, the 1% rule and both fixes for those workgroups.
+    An empty mapping clears them again.
+    """
+    sdata = get_session()
+    if 'source_records' not in sdata:
+        abort(400, description="Load a source file first.")
+    hours = (request.get_json(silent=True) or {}).get('hours') or {}
+    known = {r['workgroup'] for r in sdata['source_records']}
+    minimum = {}
+    for workgroup, raw in hours.items():
+        if raw in (None, ''):
+            continue
+        if workgroup not in known:
+            abort(400, description=f"Unknown workgroup: {workgroup}")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            abort(400, description=f"Minimum hours for {workgroup} must be a number.")
+        if value <= 0:
+            abort(400, description=f"Minimum hours for {workgroup} must be greater than 0.")
+        minimum[workgroup] = value
+    sdata['minimum_hours'] = minimum
+    sdata['min_hours_entries'] = dict(minimum)        # the entered figure is also the committed hours
+    sdata['min_hours_confirmed'] = True
+    sdata['source_snapshots'] = {}
+    sdata.pop('match_results', None)
+    sdata.pop('reasoned_results', None)
+    # Sanity check against the hours this file already plans: a Minimum Hours far from its total is
+    # probably a typo (extra/missing zero), so say so - but still accept it.
+    totals = base_layer.total_hours_by_workgroup(sdata['source_records'])
+    warnings = []
+    for workgroup, value in minimum.items():
+        total = totals.get(workgroup, 0)
+        if total and value > total:
+            warnings.append(f"{workgroup}: minimum {value:g} h is more than this file's planned {total:g} h - "
+                            f"Match minimum hours would RAISE headcounts. Check for an extra digit.")
+        elif total and value < total * 0.1:
+            warnings.append(f"{workgroup}: minimum {value:g} h is under 10% of this file's planned {total:g} h - "
+                            f"Match minimum hours would cut headcounts sharply. Check for a missing digit.")
+    return jsonify({'minimum_hours': minimum, 'one_percent_rule': _compute_one_percent(sdata), 'warnings': warnings})
 
 
 @app.route('/api/minimum-hours/validate', methods=['POST'])

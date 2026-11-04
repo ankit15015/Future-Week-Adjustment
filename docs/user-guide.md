@@ -34,6 +34,13 @@ above it, and a workgroup name per day column. Blocks it cannot read are reporte
 If the source file states **Minimum Hours** for a workgroup, you must enter the hours you commit
 to for each one. You can only continue if each value meets or exceeds the source minimum.
 
+**Files that do not state Minimum Hours** (for example the FLEX and IXD Base Layers): the app
+cannot know the figure, so a card titled *Minimum hours - not stated in this file* appears with one
+box per workgroup. Type the Minimum Hours you know for a workgroup and press **Use these minimum
+hours**: the hours are confirmed automatically, and the 1% rule, **Match minimum hours** and the
+downloads turn on for those workgroups. Leave a box empty to skip that workgroup; clear all boxes
+to turn the features off again.
+
 **Match minimum hours** (button in this step) scales the headcounts in the Source table so each
 workgroup's total hours (headcount x shift length, summed) reach the hours you entered - or the
 source's Minimum Hours if you have not entered any:

@@ -75,6 +75,7 @@ All API errors return JSON `{"description": "..."}` with the HTTP status; the UI
 | `POST /api/source/one-percent-fix` | ONE PERCENT FIX | Raises every non-zero headcount below its 1% baseline to the baseline. Returns `records`, `one_percent_rule`, `changed`. 400 if the source has no Minimum Hours |
 | `POST /api/source/match-minimum-hours` | MATCH MINIMUM HOURS | Scales headcounts so each workgroup's total hours reach the committed hours (default: source minimum), rounding up, floored at the 1% baseline. Returns `records`, `one_percent_rule`, `summary` |
 | `GET /api/source/download?stage=current\|one_percent\|min_hours` | Download the Base Layer as xlsx | `current` = as loaded/edited; the other two are snapshots taken when that fix last ran (400 until it has). Written by `base_layer.write_base_layer_xlsx`, which puts early-morning tail shifts back in their original day column so the file re-reads identically |
+| `POST /api/minimum-hours/set` | Enter Minimum Hours by hand | For sources that state none. Body `{hours: {workgroup: number}}`; sets minimum hours, treats them as committed and confirmed, recomputes the 1% rule; empty clears. `/api/source` reports `minimum_hours_from_file` |
 | `POST /api/minimum-hours/validate` | Confirm committed hours | Body `{entries: {workgroup: hours}}` |
 | `POST /api/destination` | Load the Opportunities file | 400 until minimum hours are confirmed and the 1% rule passes |
 | `POST /api/match` | Match every destination row | |
