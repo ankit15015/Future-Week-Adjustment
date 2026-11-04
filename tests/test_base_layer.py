@@ -76,10 +76,17 @@ def _record(headcount, start="06:00", end="16:00", weekday="Sunday", workgroup="
 
 def test_one_percent_rule_baseline_and_shortfall():
     # 700 min hours * 1% / 10h shift = 0.7 -> baseline ceil = 1
-    results = base_layer.compute_one_percent_rule([_record(0), _record(3, weekday="Monday")], {"Inbound": 700})
+    # 3000 min hours * 1% / 10h shift = 3.0 -> baseline 3
+    results = base_layer.compute_one_percent_rule([_record(1), _record(5, weekday="Monday")], {"Inbound": 3000})
     by_day = {r["weekday"]: r for r in results}
-    assert by_day["Sunday"]["baseline"] == 1 and not by_day["Sunday"]["passed"] and by_day["Sunday"]["shortfall"] == 1
+    assert by_day["Sunday"]["baseline"] == 3 and not by_day["Sunday"]["passed"] and by_day["Sunday"]["shortfall"] == 2
     assert by_day["Monday"]["passed"] and by_day["Monday"]["shortfall"] == 0
+
+
+def test_one_percent_rule_ignores_zero_headcounts():
+    """An empty (0) cell is not a staffed shift: like the sheet's own '1% Violation' column, skip it."""
+    results = base_layer.compute_one_percent_rule([_record(0), _record(1, weekday="Monday")], {"Inbound": 3000})
+    assert [r["weekday"] for r in results] == ["Monday"]
 
 
 def test_one_percent_rule_skips_workgroups_without_minimum_hours():
@@ -90,3 +97,50 @@ def test_one_percent_rule_wraps_shifts_past_midnight():
     # 22:00 -> 06:00 is 8h: 800 * 1% / 8 = 1.0 -> baseline 1
     results = base_layer.compute_one_percent_rule([_record(1, start="22:00", end="06:00")], {"Inbound": 800})
     assert results[0]["duration_hours"] == 8 and results[0]["baseline"] == 1
+
+
+# ---- Base Layer fixes (ported from the macro script) ----
+
+MIN = {"Inbound": 3000}   # 10h shift -> 1% baseline = 3
+
+
+def _grid(*headcounts):
+    days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    return [_record(h, weekday=d) for h, d in zip(headcounts, days)]
+
+
+def test_one_percent_fix_raises_only_nonzero_cells_below_the_baseline():
+    records = _grid(1, 0, 2, 3, 9, 0, 1)
+    fixed, changed = base_layer.apply_one_percent_fix(records, MIN)
+    assert [r["headcount"] for r in fixed] == [3, 0, 3, 3, 9, 0, 3]   # zeros stay zero, others lifted to 3
+    assert changed == 3
+    assert [r["headcount"] for r in records] == [1, 0, 2, 3, 9, 0, 1]   # input untouched
+    assert all(r["passed"] for r in base_layer.compute_one_percent_rule(fixed, MIN))
+
+
+def test_one_percent_fix_leaves_workgroups_without_minimum_hours_alone():
+    fixed, changed = base_layer.apply_one_percent_fix(_grid(1, 1, 1, 1, 1, 1, 1), {})
+    assert changed == 0 and all(r["headcount"] == 1 for r in fixed)
+
+
+def test_match_minimum_hours_scales_rounds_up_and_respects_the_one_percent_floor():
+    records = _grid(10, 20, 0, 40, 4, 10, 10)      # total = 94 x 10h = 940h
+    fixed, summary = base_layer.match_minimum_hours(records, MIN, {"Inbound": 470})   # factor 0.5
+    # 10->5, 20->10, 0 stays 0, 40->20, 4->2 but floor is 3, 10->5, 10->5
+    assert [r["headcount"] for r in fixed] == [5, 10, 0, 20, 3, 5, 5]
+    s = summary[0]
+    assert (s["workgroup"], s["target"], s["before"], s["factor"]) == ("Inbound", 470, 940.0, 0.5)
+    assert s["after"] >= 470 and s["after"] == 480.0   # rounded up, so at or just above the target
+
+
+def test_match_minimum_hours_does_not_round_float_noise_up():
+    # 940h target with factor exactly 1.0 must not nudge any cell up
+    fixed, _ = base_layer.match_minimum_hours(_grid(10, 20, 0, 40, 4, 10, 10), {"Inbound": 940}, None)
+    assert [r["headcount"] for r in fixed] == [10, 20, 0, 40, 4, 10, 10]
+
+
+def test_match_minimum_hours_defaults_to_the_source_minimum_and_skips_other_workgroups():
+    other = _record(7, workgroup="Pick")
+    fixed, summary = base_layer.match_minimum_hours(_grid(10, 10, 10, 10, 10, 10, 10) + [other], {"Inbound": 350})
+    assert [r["headcount"] for r in fixed[:7]] == [5] * 7   # 700h -> 350h
+    assert fixed[7]["headcount"] == 7 and [s["workgroup"] for s in summary] == ["Inbound"]

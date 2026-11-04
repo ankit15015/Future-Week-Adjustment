@@ -34,6 +34,18 @@ above it, and a workgroup name per day column. Blocks it cannot read are reporte
 If the source file states **Minimum Hours** for a workgroup, you must enter the hours you commit
 to for each one. You can only continue if each value meets or exceeds the source minimum.
 
+**Match minimum hours** (button in this step) scales the headcounts in the Source table so each
+workgroup's total hours (headcount x shift length, summed) reach the hours you entered - or the
+source's Minimum Hours if you have not entered any:
+
+- every non-zero headcount is multiplied by `target hours / current total hours` and **rounded up**
+  (so the new total is at or just above the target);
+- a headcount never goes below its shift's 1% baseline (step 4);
+- zero (empty) cells stay zero, and workgroups with no Minimum Hours are not touched.
+
+The result per workgroup is shown (`1519 h -> 1060 h`, factor, etc.). Because the headcounts change,
+any earlier match is discarded and the 1% rule is re-checked.
+
 ## 4. 1% rule (only if the source has Minimum Hours)
 
 Checked automatically. For each shift:
@@ -42,9 +54,11 @@ Checked automatically. For each shift:
 baseline = ceil(Minimum Hours x 1% / shift length in hours)
 ```
 
-Every day of that shift is compared to the baseline. A day below it fails, and its shortfall is
-`baseline - headcount`. Use **Fix all shortfalls** (or edit rows) until nothing fails; the
-destination step stays locked until then. Tick **Show passing days too** to see everything.
+Every non-zero day of that shift is compared to the baseline (zero cells are ignored, as in the
+Base Layer sheet's own "1% Violation" column). A day below it fails; its shortfall is
+`baseline - headcount`. **Fix all shortfalls** (the *One Percent Fix*) raises every failing non-zero
+headcount to its baseline. You can also fix one row, or edit the Source table by hand. The
+destination step stays locked until nothing fails. Tick **Show passing days too** to see everything.
 
 ## 5. Destination
 

@@ -574,7 +574,8 @@ def compute_one_percent_rule(records, minimum_hours_by_workgroup):
     the shift's own headcount on *every day of the week* individually: a day
     whose headcount is below the baseline fails, and its shortfall
     (baseline - headcount) is how much would need to be added to bring that
-    one day up to the baseline. Workgroups with no Minimum Hours figure in
+    one day up to the baseline. Cells with a headcount of 0 are ignored (as in the
+    sheet's own '1% Violation' column). Workgroups with no Minimum Hours figure in
     the source file are skipped (nothing to verify against).
     """
     import math
@@ -593,6 +594,8 @@ def compute_one_percent_rule(records, minimum_hours_by_workgroup):
         baseline_raw = min_hours * 0.01 / duration
         baseline = math.ceil(baseline_raw)
         headcount = r['headcount']
+        if headcount == 0:
+            continue   # an empty (0) cell is not a staffed shift, so the 1% rule does not apply to it
         passed = headcount >= baseline
         results.append({
             'workgroup': r['workgroup'],
@@ -612,3 +615,88 @@ def compute_one_percent_rule(records, minimum_hours_by_workgroup):
         r['workgroup'], r['start_time'], weekday_index.get(r['weekday'], 99)
     ))
     return results
+
+
+# ---------------------------------------------------------------------------
+# Headcount fixes on the Base Layer (ported from the Base Layer macro)
+# ---------------------------------------------------------------------------
+
+def _round_up(value):
+    """ceil() that ignores float noise: 10.000000001 stays 10 instead of becoming 11."""
+    import math
+    return math.ceil(round(value, 9))
+
+
+def _baseline_by_cell(records, minimum_hours_by_workgroup):
+    """{id(record): baseline} - the 1% Rule figure for each record that has one."""
+    import math
+    out = {}
+    for r in records:
+        min_hours = minimum_hours_by_workgroup.get(r['workgroup'])
+        if min_hours is None or not r.get('start_time') or not r.get('end_time'):
+            continue
+        duration = _duration_hours(to_time(r['start_time']), to_time(r['end_time']))
+        if duration:
+            out[id(r)] = math.ceil(round(min_hours * 0.01 / duration, 9))
+    return out
+
+
+def apply_one_percent_fix(records, minimum_hours_by_workgroup):
+    """
+    ONE PERCENT FIX: every non-zero headcount below its shift's 1% baseline is raised to the
+    baseline. Returns (new_records, changed_count); the input list is not modified.
+    """
+    baselines = _baseline_by_cell(records, minimum_hours_by_workgroup)
+    out, changed = [], 0
+    for r in records:
+        new = dict(r)
+        base = baselines.get(id(r))
+        if base is not None and r['headcount'] != 0 and r['headcount'] < base:
+            new['headcount'] = float(base)
+            changed += 1
+        out.append(new)
+    return out, changed
+
+
+def total_hours_by_workgroup(records):
+    """Sum of headcount x shift length over staffed (non-zero) cells, per workgroup."""
+    totals = {}
+    for r in records:
+        if r['headcount'] > 0 and r.get('start_time') and r.get('end_time'):
+            hours = _duration_hours(to_time(r['start_time']), to_time(r['end_time']))
+            totals[r['workgroup']] = totals.get(r['workgroup'], 0.0) + r['headcount'] * hours
+    return totals
+
+
+def match_minimum_hours(records, minimum_hours_by_workgroup, target_hours_by_workgroup=None):
+    """
+    MATCH MINIMUM HOURS: for each workgroup with a Minimum Hours figure, scale every non-zero
+    headcount by  target / current total hours, round up, and never go below the shift's 1%
+    baseline. The target is the hours you committed to (default: the source's Minimum Hours).
+    Rounding up means the new total is at or just above the target.
+
+    Returns (new_records, summary) where summary is a list of
+    {workgroup, target, before, after, factor} for every workgroup that was scaled.
+    """
+    targets = {**minimum_hours_by_workgroup, **(target_hours_by_workgroup or {})}
+    baselines = _baseline_by_cell(records, minimum_hours_by_workgroup)
+    before = total_hours_by_workgroup(records)
+    factors = {}
+    for wg in minimum_hours_by_workgroup:
+        if before.get(wg):
+            factors[wg] = targets[wg] / before[wg]
+    out = []
+    for r in records:
+        new = dict(r)
+        factor = factors.get(r['workgroup'])
+        if factor is not None and r['headcount'] != 0:
+            scaled = _round_up(r['headcount'] * factor)
+            new['headcount'] = float(max(scaled, baselines.get(id(r), 0)))
+        out.append(new)
+    after = total_hours_by_workgroup(out)
+    summary = [
+        {'workgroup': wg, 'target': targets[wg], 'before': round(before[wg], 2),
+         'after': round(after.get(wg, 0.0), 2), 'factor': round(f, 4)}
+        for wg, f in factors.items()
+    ]
+    return out, summary

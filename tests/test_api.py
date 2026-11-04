@@ -132,13 +132,13 @@ def test_destination_requires_a_source_with_minimum_hours_confirmed(client, tmp_
 
 def test_destination_is_blocked_while_the_one_percent_rule_fails(client, tmp_path):
     src, dst = tmp_path / "base.xlsx", tmp_path / "opps.csv"
-    make_base_layer(src, min_hours=700, headcount_overrides={("Day", "Sunday"): 0})
+    make_base_layer(src, min_hours=3000, headcount_overrides={("Day", "Sunday"): 1})
     make_opportunities_csv(dst)
     r = upload(client, "/api/source", src)
     failing = [x for x in r.get_json()["one_percent_rule"] if not x["passed"]]
-    assert [(x["weekday"], x["shortfall"]) for x in failing] == [("Sunday", 1)]
+    assert [(x["weekday"], x["shortfall"]) for x in failing] == [("Sunday", 2)]
 
-    client.post("/api/minimum-hours/validate", json={"entries": {"Inbound": 700}})
+    client.post("/api/minimum-hours/validate", json={"entries": {"Inbound": 3000}})
     blocked = upload(client, "/api/destination", dst)
     assert blocked.status_code == 400 and "1% rule" in blocked.get_json()["description"]
 
@@ -298,3 +298,48 @@ def test_loading_a_base_layer_as_destination_explains_itself(client, tmp_path):
     upload(client, "/api/source", src)
     r = upload(client, "/api/destination", src)
     assert r.status_code == 400 and "load it under Source" in r.get_json()["description"]
+
+
+# ---- the two Base Layer fixes through the API ----
+
+def _load_source_with_min_hours(client, tmp_path, **overrides):
+    src = tmp_path / "base.xlsx"
+    make_base_layer(src, min_hours=3000, **overrides)
+    return upload(client, "/api/source", src).get_json()
+
+
+def test_one_percent_fix_endpoint_lifts_shortfalls_and_unlocks_the_destination(client, tmp_path):
+    loaded = _load_source_with_min_hours(client, tmp_path, headcount_overrides={("Day", "Sunday"): 1, ("Day", "Monday"): 0})
+    assert [x["weekday"] for x in loaded["one_percent_rule"] if not x["passed"]] == ["Sunday"]   # the 0 is ignored
+
+    r = client.post("/api/source/one-percent-fix").get_json()
+    assert r["changed"] == 1 and all(x["passed"] for x in r["one_percent_rule"])
+    day = {x["weekday"]: x["headcount"] for x in r["records"] if x["shift_name"] == "Day"}
+    assert day["Sunday"] == 3 and day["Monday"] == 0
+
+    client.post("/api/minimum-hours/validate", json={"entries": {"Inbound": 3000}})
+    dst = tmp_path / "opps.csv"
+    make_opportunities_csv(dst)
+    assert upload(client, "/api/destination", dst).status_code == 200
+
+
+def test_match_minimum_hours_endpoint_scales_to_the_committed_hours(client, tmp_path):
+    _load_source_with_min_hours(client, tmp_path)
+    # Source hours: Day 10h x (10..16) + Late 9h x (20..26) -> committing to more hours than the minimum
+    client.post("/api/minimum-hours/validate", json={"entries": {"Inbound": 3500}})
+    r = client.post("/api/source/match-minimum-hours").get_json()
+    s = r["summary"][0]
+    assert s["target"] == 3500 and s["after"] >= 3500 and s["after"] - 3500 < 100
+    assert all(x["passed"] for x in r["one_percent_rule"])           # the 1% floor still holds
+
+
+def test_match_minimum_hours_defaults_to_the_source_minimum(client, tmp_path):
+    _load_source_with_min_hours(client, tmp_path)
+    s = client.post("/api/source/match-minimum-hours").get_json()["summary"][0]
+    assert s["target"] == 3000
+
+
+def test_fixes_discard_stale_matches_and_need_minimum_hours(client, loaded_client, tmp_path):
+    # loaded_client's source has no Minimum Hours, so neither fix applies
+    assert loaded_client.post("/api/source/one-percent-fix").status_code == 400
+    assert loaded_client.post("/api/source/match-minimum-hours").status_code == 400

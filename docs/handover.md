@@ -6,7 +6,7 @@ Read this first if you are taking the project over.
 
 The **Standard** workflow is complete and tested end to end: Base Layer -> minimum hours -> 1% rule
 -> Opportunities file -> match -> reasons -> reviewed, filterable final result -> download.
-`pytest` runs 57 tests (all passing at handover).
+`pytest` runs 69 tests (all passing at handover).
 
 Last verified on Python 3.13 on Windows. Render uses Python 3.11.9; that combination has **not**
 been run here (there is no CI), so run `pytest` on 3.11 before relying on it.
@@ -32,6 +32,11 @@ been run here (there is no CI), so run `pytest` on 3.11 before relying on it.
    (`app.js`) was checked by driving it in a simulated browser (jsdom) against real Opportunities
    files, but that script is not in the repo because it needs real data. If you change filtering or
    the final-result table, test it by hand with a few different files.
+
+9. **Only two of the macro's five Base Layer tools are implemented.** One Percent Fix and Match
+   Minimum Hours are in; Midnight Rule Fix, Change All Headcounts to One Number and Increase /
+   Decrease Specific Headcounts (from the original script) are not. The macro drives them from a
+   `Brain` sheet; here the target comes from the Minimum hours step instead.
 
 ## Gotchas
 

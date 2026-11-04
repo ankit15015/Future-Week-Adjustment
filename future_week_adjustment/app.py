@@ -145,6 +145,7 @@ def api_source():
     sdata['source_kind'] = 'image' if ext in ('.pdf', '.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.webp') else 'spreadsheet'
     sdata['minimum_hours'] = minimum_hours
     sdata['min_hours_confirmed'] = not minimum_hours  # nothing to confirm if the source has none
+    sdata['min_hours_entries'] = {}
     one_percent_results = _compute_one_percent(sdata)
 
     weekdays_present = sorted(set(r['weekday'] for r in records), key=base_layer.WEEKDAYS.index)
@@ -182,6 +183,38 @@ def api_source_update():
     return jsonify({'record_count': len(records), 'one_percent_rule': one_percent_results})
 
 
+def _source_fix_response(sdata, records, **extra):
+    sdata['source_records'] = records
+    sdata.pop('match_results', None)       # earlier matches were built from the old headcounts
+    sdata.pop('reasoned_results', None)
+    return jsonify({'records': records, 'one_percent_rule': _compute_one_percent(sdata), **extra})
+
+
+@app.route('/api/source/one-percent-fix', methods=['POST'])
+def api_one_percent_fix():
+    """ONE PERCENT FIX: raise every non-zero headcount that is below its 1% baseline up to it."""
+    sdata = get_session()
+    if 'source_records' not in sdata:
+        abort(400, description="Load a source file first.")
+    if not sdata.get('minimum_hours'):
+        abort(400, description="This source file has no Minimum Hours, so there is no 1% rule to fix.")
+    records, changed = base_layer.apply_one_percent_fix(sdata['source_records'], sdata['minimum_hours'])
+    return _source_fix_response(sdata, records, changed=changed)
+
+
+@app.route('/api/source/match-minimum-hours', methods=['POST'])
+def api_match_minimum_hours():
+    """MATCH MINIMUM HOURS: scale headcounts so each workgroup's total hours reach its target."""
+    sdata = get_session()
+    if 'source_records' not in sdata:
+        abort(400, description="Load a source file first.")
+    if not sdata.get('minimum_hours'):
+        abort(400, description="This source file has no Minimum Hours to match.")
+    records, summary = base_layer.match_minimum_hours(
+        sdata['source_records'], sdata['minimum_hours'], sdata.get('min_hours_entries'))
+    return _source_fix_response(sdata, records, summary=summary)
+
+
 @app.route('/api/minimum-hours/validate', methods=['POST'])
 def api_minimum_hours_validate():
     sdata = get_session()
@@ -209,6 +242,7 @@ def api_minimum_hours_validate():
         })
 
     sdata['min_hours_confirmed'] = all_ok
+    sdata['min_hours_entries'] = {c['workgroup']: c['entered'] for c in checks if c['entered'] is not None}
     return jsonify({'passed': all_ok, 'checks': checks})
 
 

@@ -415,16 +415,46 @@ async function applyOnePercentFix(row) {
   }
 }
 
+// Source edits and the two fixes below all change state.sourceRecords, so they share this.
+function adoptFixedRecords(data) {
+  state.sourceRecords = data.records;
+  state.matchResults = [];
+  state.reasonedResults = [];
+  state.exportDone = false;
+  el('match-table-wrap').classList.add('hidden');
+  el('match-summary').innerHTML = '';
+  renderSourceTable();
+  setupOnePercentStep(data.one_percent_rule || []);
+  updateMatchButtonState();
+  updateStepRail();
+}
+
+// ONE PERCENT FIX: raise every non-zero headcount below its 1% baseline up to the baseline.
 el('one-percent-fix-all-btn').addEventListener('click', async () => {
-  state.onePercentResults.filter(r => !r.passed).forEach(row => {
-    const rec = findMatchingSourceRecord(row);
-    if (rec) rec.headcount = row.baseline;
-  });
   try {
-    await persistSourceRecords();
-    renderSourceTable();
+    await persistSourceRecords();    // include any edits made in the source table
+    const data = await api('/api/source/one-percent-fix', { method: 'POST' });
+    adoptFixedRecords(data);
+    setStatus(el('one-percent-status'), `Fixed ${data.changed} cell(s) up to their 1% baseline.`, 'ok');
   } catch (e) {
     setStatus(el('one-percent-status'), 'Error applying fixes: ' + e.message, 'error');
+  }
+});
+
+// MATCH MINIMUM HOURS: scale headcounts so each workgroup's total hours reach its target.
+el('match-min-hours-btn').addEventListener('click', async () => {
+  const out = el('match-min-hours-result');
+  try {
+    await persistSourceRecords();
+    const data = await api('/api/source/match-minimum-hours', { method: 'POST' });
+    adoptFixedRecords(data);
+    out.innerHTML = data.summary.map(s =>
+      `<div><strong>${escapeHtml(s.workgroup)}</strong>: ${s.before} h &rarr; ${s.after} h ` +
+      `(target ${s.target} h, headcounts &times; ${s.factor}, rounded up, kept at or above the 1% rule)</div>`).join('') +
+      '<div>Headcounts in the Source table above were updated. Re-confirm the minimum hours if you change the numbers.</div>';
+    out.className = 'status ok';
+  } catch (e) {
+    setStatus(out, 'Error: ' + e.message, 'error');
   }
 });
 
