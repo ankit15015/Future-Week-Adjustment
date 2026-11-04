@@ -31,12 +31,10 @@ function updateStepRail() {
     const li = document.querySelector(`.rail-step[data-rail="${s.key}"]`);
     if (!li) return;
     li.classList.remove('is-done', 'is-current', 'is-skipped');
-    li.hidden = false;
     const existingNote = li.querySelector('.rail-note');
     if (existingNote) existingNote.remove();
     if (s.skipped) {
       li.classList.add('is-skipped');
-      li.hidden = true;   // steps that don't apply to this source are not shown
       const note = document.createElement('span');
       note.className = 'rail-note';
       note.textContent = 'not needed here';
