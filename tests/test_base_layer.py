@@ -144,3 +144,17 @@ def test_match_minimum_hours_defaults_to_the_source_minimum_and_skips_other_work
     fixed, summary = base_layer.match_minimum_hours(_grid(10, 10, 10, 10, 10, 10, 10) + [other], {"Inbound": 350})
     assert [r["headcount"] for r in fixed[:7]] == [5] * 7   # 700h -> 350h
     assert fixed[7]["headcount"] == 7 and [s["workgroup"] for s in summary] == ["Inbound"]
+
+
+def test_written_base_layer_reads_back_identically_including_tail_shifts(tmp_path):
+    src = tmp_path / "base.xlsx"
+    make_base_layer(src, min_hours=3000, tail_shift=True)     # has an early-morning 'Tail' shift
+    records, _, minimum, _ = base_layer.parse_source(str(src))
+    out = tmp_path / "out.xlsx"
+    base_layer.write_base_layer_xlsx(records, minimum, str(out), site="TST1")
+
+    back, _, minimum_back, _ = base_layer.parse_source(str(out))
+    key = lambda r: (r["workgroup"], r["weekday"], r["shift_name"], r["start_time"], r["end_time"])
+    assert {key(r): r["headcount"] for r in back} == {key(r): r["headcount"] for r in records}
+    assert minimum_back == minimum
+    assert base_layer.list_sites(str(out)) == ["TST1"]

@@ -146,6 +146,8 @@ def api_source():
     sdata['minimum_hours'] = minimum_hours
     sdata['min_hours_confirmed'] = not minimum_hours  # nothing to confirm if the source has none
     sdata['min_hours_entries'] = {}
+    sdata['source_snapshots'] = {}
+    sdata['source_site'] = site or ''
     one_percent_results = _compute_one_percent(sdata)
 
     weekdays_present = sorted(set(r['weekday'] for r in records), key=base_layer.WEEKDAYS.index)
@@ -199,6 +201,7 @@ def api_one_percent_fix():
     if not sdata.get('minimum_hours'):
         abort(400, description="This source file has no Minimum Hours, so there is no 1% rule to fix.")
     records, changed = base_layer.apply_one_percent_fix(sdata['source_records'], sdata['minimum_hours'])
+    sdata.setdefault('source_snapshots', {})['one_percent'] = records
     return _source_fix_response(sdata, records, changed=changed)
 
 
@@ -212,7 +215,28 @@ def api_match_minimum_hours():
         abort(400, description="This source file has no Minimum Hours to match.")
     records, summary = base_layer.match_minimum_hours(
         sdata['source_records'], sdata['minimum_hours'], sdata.get('min_hours_entries'))
+    sdata.setdefault('source_snapshots', {})['min_hours'] = records
     return _source_fix_response(sdata, records, summary=summary)
+
+
+STAGE_LABELS = {'current': 'Base Layer', 'one_percent': 'after 1 percent fix', 'min_hours': 'after minimum hours match'}
+
+
+@app.route('/api/source/download')
+def api_source_download():
+    """Download the Base Layer as an xlsx: its current state, or the state right after a fix."""
+    sdata = get_session()
+    stage = request.args.get('stage', 'current')
+    if stage not in STAGE_LABELS:
+        abort(400, description="Unknown stage.")
+    records = sdata.get('source_records') if stage == 'current' else sdata.get('source_snapshots', {}).get(stage)
+    if not records:
+        abort(400, description="Run that fix first.")
+    stem = os.path.splitext(sdata.get('source_filename', 'Base Layer'))[0]
+    site = sdata.get('source_site', '')
+    name = secure_filename(f"{stem}{' - ' + site if site and site not in stem else ''} - {STAGE_LABELS[stage]}.xlsx")
+    base_layer.write_base_layer_xlsx(records, sdata.get('minimum_hours', {}), os.path.join(OUTPUT_DIR, name), site)
+    return send_from_directory(OUTPUT_DIR, name, as_attachment=True)
 
 
 @app.route('/api/minimum-hours/validate', methods=['POST'])

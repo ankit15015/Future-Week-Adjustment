@@ -700,3 +700,99 @@ def match_minimum_hours(records, minimum_hours_by_workgroup, target_hours_by_wor
         for wg, f in factors.items()
     ]
     return out, summary
+
+
+def write_base_layer_xlsx(records, minimum_hours_by_workgroup, path, site=''):
+    """
+    Write Base Layer records to an .xlsx in the standard block layout (one block per workgroup):
+    title, weekday row, 'Shift / Start Time / End Time' header with the workgroup over each day,
+    one row per shift, then Number of Opps / Time (hrs) / Total Hours / 1% Rule per shift and the
+    block's Total Hours and Minimum Hours. Works for any source type (xlsx, xlsb, csv, image).
+    """
+    import openpyxl
+    from openpyxl.styles import Font
+    from openpyxl.utils import get_column_letter as col
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Baselayer'
+    bold = Font(bold=True)
+    time_fmt = 'hh:mm'
+
+    blocks = {}
+    for r in records:
+        blocks.setdefault(r['workgroup'], []).append(r)
+
+    row = 2
+    for workgroup, recs in blocks.items():
+        shifts = []
+        for r in recs:
+            key = (r['shift_name'], r['start_time'], r['end_time'])
+            if key not in shifts:
+                shifts.append(key)
+        min_hours = minimum_hours_by_workgroup.get(workgroup)
+
+        title = f"{site} FC Ready Base Layer" if site else "Base Layer"
+        ws.cell(row, 5, title).font = bold
+        row += 1
+        for i, wd in enumerate(WEEKDAYS):
+            ws.cell(row, 8 + i, wd)
+        row += 1
+        header = row
+        for c, label in ((5, 'Shift'), (6, 'Start Time'), (7, 'End Time'), (16, 'Number of Opps'),
+                         (17, 'Time (hrs)'), (18, 'Total Hours'), (20, '1% Rule')):
+            ws.cell(header, c, label).font = bold
+        for i in range(7):
+            ws.cell(header, 8 + i, workgroup).font = bold
+        row += 1
+
+        # The parser moves a shift that starts earlier than the block's first shift (an early-morning
+        # 'tail' of the previous night) to the day AFTER its column; write it back to its own column.
+        anchor = None
+        tail = set()
+        for name, start, end in shifts:
+            tv = to_time(start)
+            minutes = tv.hour * 60 + tv.minute if tv else None
+            if minutes is None:
+                continue
+            if anchor is None:
+                anchor = minutes
+            elif minutes < anchor:
+                tail.add((name, start, end))
+
+        first = row
+        for name, start, end in shifts:
+            ws.cell(row, 5, name)
+            for c, v in ((6, start), (7, end)):
+                tv = to_time(v)
+                cell = ws.cell(row, c, tv)
+                cell.number_format = time_fmt
+            for r in recs:
+                if (r['shift_name'], r['start_time'], r['end_time']) == (name, start, end):
+                    n = int(r['headcount']) if float(r['headcount']).is_integer() else r['headcount']
+                    day = WEEKDAYS.index(r['weekday'])
+                    if (name, start, end) in tail:
+                        day = (day - 1) % 7
+                    ws.cell(row, 8 + day, n)
+            ws.cell(row, 16, f'=SUM(H{row}:N{row})')
+            ws.cell(row, 17, round(_duration_hours(to_time(start), to_time(end)), 4))
+            ws.cell(row, 18, f'=P{row}*Q{row}')
+            if min_hours is not None:
+                import math
+                ws.cell(row, 20, math.ceil(round(min_hours * 0.01 / _duration_hours(to_time(start), to_time(end)), 9)))
+            row += 1
+        last = row - 1
+        ws.cell(row, 17, 'Total Hours').font = bold
+        ws.cell(row, 18, f'=SUM(R{first}:R{last})').font = bold
+        row += 1
+        if min_hours is not None:
+            ws.cell(row, 18, min_hours).font = bold
+            ws.cell(row, 19, 'Minimum Hours').font = bold
+            row += 1
+        row += 2
+
+    for c, width in ((5, 24), (6, 11), (7, 11), (16, 15), (17, 11), (18, 12), (20, 9)):
+        ws.column_dimensions[col(c)].width = width
+    for c in range(8, 15):
+        ws.column_dimensions[col(c)].width = 13
+    wb.save(path)

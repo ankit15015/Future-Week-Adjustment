@@ -678,3 +678,5 @@ td input:focus { border-color: var(--accent); background: white; }
   .rail-step { padding-left: 20px; }
 }
 
+
+.download-link { display: inline-block; margin-left: 8px; font-weight: 600; color: var(--accent-ink); text-decoration: underline; }

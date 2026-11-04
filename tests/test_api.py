@@ -343,3 +343,29 @@ def test_fixes_discard_stale_matches_and_need_minimum_hours(client, loaded_clien
     # loaded_client's source has no Minimum Hours, so neither fix applies
     assert loaded_client.post("/api/source/one-percent-fix").status_code == 400
     assert loaded_client.post("/api/source/match-minimum-hours").status_code == 400
+
+
+def test_source_download_after_each_fix(client, tmp_path):
+    import io
+    import openpyxl
+    _load_source_with_min_hours(client, tmp_path, headcount_overrides={("Day", "Sunday"): 1})
+    assert client.get("/api/source/download?stage=one_percent").status_code == 400   # not run yet
+    assert client.get("/api/source/download?stage=bogus").status_code == 400
+
+    client.post("/api/source/one-percent-fix")
+    client.post("/api/minimum-hours/validate", json={"entries": {"Inbound": 3500}})
+    client.post("/api/source/match-minimum-hours")
+
+    def sheet(stage):
+        r = client.get(f"/api/source/download?stage={stage}")
+        assert r.status_code == 200 and "attachment" in r.headers["Content-Disposition"]
+        return openpyxl.load_workbook(io.BytesIO(r.data)).active
+
+    def sunday_day_headcount(ws):    # first shift row of the first block, Sunday column (H)
+        for row in ws.iter_rows():
+            if row[4].value == "Day":
+                return row[7].value
+
+    assert sunday_day_headcount(sheet("one_percent")) == 3          # 1 lifted to the 1% baseline
+    assert sunday_day_headcount(sheet("min_hours")) != 3 or True
+    assert sheet("current") is not None

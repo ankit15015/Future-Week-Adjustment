@@ -46,6 +46,13 @@ source's Minimum Hours if you have not entered any:
 The result per workgroup is shown (`1519 h -> 1060 h`, factor, etc.). Because the headcounts change,
 any earlier match is discarded and the 1% rule is re-checked.
 
+**Downloading the Base Layer.** After you load a source, and again after each fix (*Match minimum
+hours* and *Fix all shortfalls*), a **Download Base Layer ...** link appears. It gives an `.xlsx`
+of the Base Layer exactly as it was at that moment (one block per workgroup, with total hours, the
+1% Rule per shift and the Minimum Hours), so you can keep the "after 1% fix" and "after minimum
+hours" versions separately. This works for every source type, including `.xlsb`, `.csv` and
+screenshots.
+
 ## 4. 1% rule (only if the source has Minimum Hours)
 
 Checked automatically. For each shift:

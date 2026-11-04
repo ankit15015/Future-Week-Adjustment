@@ -133,6 +133,7 @@
       <button id="min-hours-confirm-btn" class="primary">Confirm minimum hours</button>
       <button id="match-min-hours-btn" class="secondary" title="Scale every headcount so each workgroup's total hours reach the hours above (or the source minimum if you have not entered any). Rounds up and never goes below the 1% rule.">Match minimum hours</button>
       <div id="match-min-hours-result" class="status"></div>
+      <div id="min-hours-downloads" class="download-row"></div>
       <div id="min-hours-status" class="status"></div>
     </section>
 
@@ -140,6 +141,7 @@
       <h2>1% rule verification <span class="h2-sub">checked automatically from the source file</span></h2>
       <p class="summary-line">For each shift, the baseline is ceil(workgroup's Minimum Hours &times; 1% &divide; shift length) &mdash; this matches the source file's own '1% Rule' figure. Every day of the week for that shift is then checked against its baseline individually.</p>
       <div id="one-percent-status" class="status"></div>
+      <div id="one-percent-downloads" class="download-row"></div>
       <div class="one-percent-toolbar">
         <label><input type="checkbox" id="one-percent-show-all"> Show passing days too</label>
         <button id="one-percent-fix-all-btn" class="secondary small hidden">Fix all shortfalls</button>

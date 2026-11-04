@@ -123,6 +123,9 @@ async function submitSource(formData) {
     state.reasonedResults = [];
     state.exportDone = false;
     setStatus(el('source-status'), `Loaded "${data.filename}"${data.site ? ` for site ${data.site}` : ''} (${data.kind}) — ${data.record_count} shift/day/workgroup cells found.`, 'ok');
+    addDownloadLink(el('source-status'), 'current', 'Download Base Layer (xlsx)');
+    el('one-percent-downloads').textContent = '';
+    el('min-hours-downloads').textContent = '';
     if (data.warnings && data.warnings.length) {
       el('source-warnings').innerHTML = data.warnings.map(w => `<div>${escapeHtml(w)}</div>`).join('');
     }
@@ -416,6 +419,17 @@ async function applyOnePercentFix(row) {
 }
 
 // Source edits and the two fixes below all change state.sourceRecords, so they share this.
+// A link to the adjusted Base Layer (xlsx). stage: 'current' | 'one_percent' | 'min_hours'.
+function addDownloadLink(container, stage, label) {
+  container.textContent = '';
+  const a = document.createElement('a');
+  a.href = `/api/source/download?stage=${stage}`;
+  a.className = 'download-link';
+  a.textContent = label;
+  container.appendChild(document.createTextNode(' '));
+  container.appendChild(a);
+}
+
 function adoptFixedRecords(data) {
   state.sourceRecords = data.records;
   state.matchResults = [];
@@ -436,6 +450,7 @@ el('one-percent-fix-all-btn').addEventListener('click', async () => {
     const data = await api('/api/source/one-percent-fix', { method: 'POST' });
     adoptFixedRecords(data);
     setStatus(el('one-percent-status'), `Fixed ${data.changed} cell(s) up to their 1% baseline.`, 'ok');
+    addDownloadLink(el('one-percent-downloads'), 'one_percent', 'Download Base Layer after 1% fix');
   } catch (e) {
     setStatus(el('one-percent-status'), 'Error applying fixes: ' + e.message, 'error');
   }
@@ -453,6 +468,7 @@ el('match-min-hours-btn').addEventListener('click', async () => {
       `(target ${s.target} h, headcounts &times; ${s.factor}, rounded up, kept at or above the 1% rule)</div>`).join('') +
       '<div>Headcounts in the Source table above were updated. Re-confirm the minimum hours if you change the numbers.</div>';
     out.className = 'status ok';
+    addDownloadLink(el('min-hours-downloads'), 'min_hours', 'Download Base Layer after minimum hours match');
   } catch (e) {
     setStatus(out, 'Error: ' + e.message, 'error');
   }
