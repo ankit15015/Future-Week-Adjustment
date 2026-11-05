@@ -355,7 +355,7 @@ def test_source_download_after_each_fix(client, tmp_path):
     import io
     import openpyxl
     _load_source_with_min_hours(client, tmp_path, headcount_overrides={("Day", "Sunday"): 1})
-    assert client.get("/api/source/download?stage=one_percent").status_code == 400   # not run yet
+    assert client.get("/api/source/download?stage=min_hours").status_code == 400     # match not run yet
     assert client.get("/api/source/download?stage=bogus").status_code == 400
 
     client.post("/api/source/one-percent-fix")
@@ -428,3 +428,9 @@ def test_manual_minimum_hours_warns_when_the_number_looks_wrong(client, tmp_path
     too_low = client.post("/api/minimum-hours/set", json={"hours": {"Inbound": 15}}).get_json()
     assert len(too_low["warnings"]) == 1 and "under 10%" in too_low["warnings"][0]
     assert too_low["minimum_hours"] == {"Inbound": 15.0}        # still accepted: it is a warning, not an error
+
+
+def test_one_percent_download_is_available_without_running_the_bulk_fix(client, tmp_path):
+    _load_source_with_min_hours(client, tmp_path)            # nothing violates the rule, no fix pressed
+    r = client.get("/api/source/download?stage=one_percent")
+    assert r.status_code == 200 and "after_1_percent_fix" in r.headers["Content-Disposition"]

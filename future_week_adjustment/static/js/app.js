@@ -407,6 +407,7 @@ function setupOnePercentStep(results) {
     return;
   }
   el('step-one-percent').classList.remove('hidden');
+  addDownloadLink(el('one-percent-downloads'), 'one_percent', 'Download Base Layer (after 1% rule)');
   state.onePercentOk = results.every(r => r.passed);
   const failing = results.filter(r => !r.passed);
   if (state.onePercentOk) {

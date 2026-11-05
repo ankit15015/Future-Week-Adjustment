@@ -232,6 +232,8 @@ def api_source_download():
     if stage not in STAGE_LABELS:
         abort(400, description="Unknown stage.")
     records = sdata.get('source_records') if stage == 'current' else sdata.get('source_snapshots', {}).get(stage)
+    if not records and stage == 'one_percent':
+        records = sdata.get('source_records')      # no bulk fix run: the file as it stands (incl. per-row fixes)
     if not records:
         abort(400, description="Run that fix first.")
     stem = os.path.splitext(sdata.get('source_filename', 'Base Layer'))[0]
