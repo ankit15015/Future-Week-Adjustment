@@ -6,7 +6,7 @@ Read this first if you are taking the project over.
 
 The **Standard** workflow is complete and tested end to end: Base Layer -> minimum hours -> 1% rule
 -> Opportunities file -> match -> reasons -> reviewed, filterable final result -> download.
-`pytest` runs 75 tests (all passing at handover).
+`pytest` runs 79 tests (all passing at handover).
 
 Last verified on Python 3.13 on Windows. Render uses Python 3.11.9; that combination has **not**
 been run here (there is no CI), so run `pytest` on 3.11 before relying on it.

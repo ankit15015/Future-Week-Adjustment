@@ -73,7 +73,7 @@ All API errors return JSON `{"description": "..."}` with the HTTP status; the UI
 | `POST /api/source` | Load a Base Layer | Form: `filename` (existing file) **or** `file` (upload). Returns records, warnings, minimum hours, 1% rule results |
 | `POST /api/source/update` | Save edited source records | Validates headcount, weekday, `HH:MM`; recomputes the 1% rule |
 | `POST /api/source/one-percent-fix` | ONE PERCENT FIX | Raises every non-zero headcount below its 1% baseline to the baseline. Returns `records`, `one_percent_rule`, `changed`. 400 if the source has no Minimum Hours |
-| `POST /api/source/match-minimum-hours` | MATCH MINIMUM HOURS | Scales headcounts so each workgroup's total hours reach the committed hours (default: source minimum), rounding up, floored at the 1% baseline. Returns `records`, `one_percent_rule`, `summary` |
+| `POST /api/source/match-minimum-hours` | MATCH MINIMUM HOURS | Body `{workgroups?: string[]}`. Adds opportunities until each workgroup's planned hours reach its Minimum Hours (only adds; spreads to the lowest headcounts; zero cells untouched). Returns `records`, `one_percent_rule`, `summary` (`before`, `after`, `added`). Does not run the 1% fix |
 | `GET /api/source/download?stage=current\|one_percent\|min_hours` | Download the Base Layer as xlsx | `current` = as loaded/edited; the other two are snapshots taken when that fix last ran (400 until it has). Written by `base_layer.write_base_layer_xlsx`, which puts early-morning tail shifts back in their original day column so the file re-reads identically |
 | `POST /api/minimum-hours/set` | Enter Minimum Hours by hand | For sources that state none. Body `{hours: {workgroup: number}}`; sets minimum hours, treats them as committed and confirmed, recomputes the 1% rule; empty clears. `/api/source` reports `minimum_hours_from_file` |
 | `POST /api/minimum-hours/validate` | Confirm committed hours | Body `{entries: {workgroup: hours}}` |
@@ -95,7 +95,7 @@ All API errors return JSON `{"description": "..."}` with the HTTP status; the UI
   (for example 02:45 after a 21:00 shift) is the tail of the *previous* day's overnight period, so
   its headcount is moved to the day **after** its column label. This was verified against a real
   file; it has a regression test.
-- **1% rule**: `baseline = ceil(MinimumHours x 0.01 / shiftHours)`, checked per shift per day on non-zero cells only. `apply_one_percent_fix` and `match_minimum_hours` in `base_layer.py` are ports of the Base Layer macro's *One Percent Fix* and *Match Minimum Hours*; both return new records and discard stale match results.
+- **1% rule**: `baseline = ceil(MinimumHours x 0.01 / shiftHours)`, checked per shift per day on non-zero cells only. `apply_one_percent_fix` and `match_minimum_hours` in `base_layer.py` implement the Base Layer macro's *One Percent Fix* and *Match Minimum Hours* as two independent tools; both return new records and discard stale match results. `/api/minimum-hours/validate` also reports each workgroup's `planned` hours so the page can offer the match.
 
 ## Front end
 

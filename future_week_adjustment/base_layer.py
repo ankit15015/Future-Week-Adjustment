@@ -621,12 +621,6 @@ def compute_one_percent_rule(records, minimum_hours_by_workgroup):
 # Headcount fixes on the Base Layer (ported from the Base Layer macro)
 # ---------------------------------------------------------------------------
 
-def _round_up(value):
-    """ceil() that ignores float noise: 10.000000001 stays 10 instead of becoming 11."""
-    import math
-    return math.ceil(round(value, 9))
-
-
 def _baseline_by_cell(records, minimum_hours_by_workgroup):
     """{id(record): baseline} - the 1% Rule figure for each record that has one."""
     import math
@@ -668,37 +662,41 @@ def total_hours_by_workgroup(records):
     return totals
 
 
-def match_minimum_hours(records, minimum_hours_by_workgroup, target_hours_by_workgroup=None):
+def match_minimum_hours(records, minimum_hours_by_workgroup, workgroups=None):
     """
-    MATCH MINIMUM HOURS: for each workgroup with a Minimum Hours figure, scale every non-zero
-    headcount by  target / current total hours, round up, and never go below the shift's 1%
-    baseline. The target is the hours you committed to (default: the source's Minimum Hours).
-    Rounding up means the new total is at or just above the target.
+    MATCH MINIMUM HOURS: if a workgroup's planned hours (headcount x shift length, summed) are below
+    its Minimum Hours, add opportunities until the shortage is covered. It only ever adds, and does
+    nothing for a workgroup that already meets its minimum. Opportunities go to shifts/days that
+    already have some (zero cells are left alone), always to the lowest current headcount so the
+    additions are spread evenly; a shift that fits the remaining shortage is preferred so the total
+    does not overshoot more than necessary. It does not touch the 1% rule (a separate tool).
 
-    Returns (new_records, summary) where summary is a list of
-    {workgroup, target, before, after, factor} for every workgroup that was scaled.
+    `workgroups` limits the run to those workgroups (default: all with a Minimum Hours figure).
+    Returns (new_records, summary): summary has {workgroup, target, before, after, added} for each
+    workgroup considered.
     """
-    targets = {**minimum_hours_by_workgroup, **(target_hours_by_workgroup or {})}
-    baselines = _baseline_by_cell(records, minimum_hours_by_workgroup)
-    before = total_hours_by_workgroup(records)
-    factors = {}
-    for wg in minimum_hours_by_workgroup:
-        if before.get(wg):
-            factors[wg] = targets[wg] / before[wg]
-    out = []
-    for r in records:
-        new = dict(r)
-        factor = factors.get(r['workgroup'])
-        if factor is not None and r['headcount'] != 0:
-            scaled = _round_up(r['headcount'] * factor)
-            new['headcount'] = float(max(scaled, baselines.get(id(r), 0)))
-        out.append(new)
-    after = total_hours_by_workgroup(out)
-    summary = [
-        {'workgroup': wg, 'target': targets[wg], 'before': round(before[wg], 2),
-         'after': round(after.get(wg, 0.0), 2), 'factor': round(f, 4)}
-        for wg, f in factors.items()
-    ]
+    out = [dict(r) for r in records]
+    summary = []
+    for workgroup, target in minimum_hours_by_workgroup.items():
+        if workgroups is not None and workgroup not in workgroups:
+            continue
+        cells = []
+        for r in out:
+            if r['workgroup'] == workgroup and r['headcount'] > 0 and r.get('start_time') and r.get('end_time'):
+                cells.append((r, _duration_hours(to_time(r['start_time']), to_time(r['end_time']))))
+        before = sum(r['headcount'] * hours for r, hours in cells)
+        total, added = before, 0
+        while cells and total < target - 1e-9 and added < 100000:
+            lowest = min(r['headcount'] for r, _ in cells)
+            candidates = [(r, h) for r, h in cells if r['headcount'] == lowest]
+            shortage = target - total
+            fitting = [(r, h) for r, h in candidates if h <= shortage + 1e-9]
+            cell, hours = max(fitting, key=lambda c: c[1]) if fitting else min(candidates, key=lambda c: c[1])
+            cell['headcount'] += 1
+            total += hours
+            added += 1
+        summary.append({'workgroup': workgroup, 'target': target, 'before': round(before, 2),
+                        'after': round(total, 2), 'added': added})
     return out, summary
 
 

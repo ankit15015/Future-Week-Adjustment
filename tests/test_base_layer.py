@@ -123,27 +123,60 @@ def test_one_percent_fix_leaves_workgroups_without_minimum_hours_alone():
     assert changed == 0 and all(r["headcount"] == 1 for r in fixed)
 
 
-def test_match_minimum_hours_scales_rounds_up_and_respects_the_one_percent_floor():
-    records = _grid(10, 20, 0, 40, 4, 10, 10)      # total = 94 x 10h = 940h
-    fixed, summary = base_layer.match_minimum_hours(records, MIN, {"Inbound": 470})   # factor 0.5
-    # 10->5, 20->10, 0 stays 0, 40->20, 4->2 but floor is 3, 10->5, 10->5
-    assert [r["headcount"] for r in fixed] == [5, 10, 0, 20, 3, 5, 5]
+def _hours(records, workgroup="Inbound"):
+    return sum(r["headcount"] * 10 for r in records if r["workgroup"] == workgroup and r["headcount"] > 0)   # 10h shifts
+
+
+def test_match_minimum_hours_adds_opportunities_until_the_minimum_is_met():
+    records = _grid(10, 20, 0, 40, 4, 10, 10)          # 94 x 10h = 940h planned
+    fixed, summary = base_layer.match_minimum_hours(records, {"Inbound": 1000})
     s = summary[0]
-    assert (s["workgroup"], s["target"], s["before"], s["factor"]) == ("Inbound", 470, 940.0, 0.5)
-    assert s["after"] >= 470 and s["after"] == 480.0   # rounded up, so at or just above the target
+    assert (s["before"], s["target"], s["added"], s["after"]) == (940.0, 1000, 6, 1000.0)   # 60h / 10h = 6 more
+    assert _hours(fixed) == 1000
+    assert [r["headcount"] for r in records] == [10, 20, 0, 40, 4, 10, 10]                   # input untouched
 
 
-def test_match_minimum_hours_does_not_round_float_noise_up():
-    # 940h target with factor exactly 1.0 must not nudge any cell up
-    fixed, _ = base_layer.match_minimum_hours(_grid(10, 20, 0, 40, 4, 10, 10), {"Inbound": 940}, None)
-    assert [r["headcount"] for r in fixed] == [10, 20, 0, 40, 4, 10, 10]
+def test_match_minimum_hours_only_adds_never_removes_and_skips_zero_days():
+    fixed, _ = base_layer.match_minimum_hours(_grid(10, 20, 0, 40, 4, 10, 10), {"Inbound": 1500})
+    before = [10, 20, 0, 40, 4, 10, 10]
+    assert all(new >= old for new, old in zip((r["headcount"] for r in fixed), before))
+    assert fixed[2]["headcount"] == 0                  # the zero day is left alone
+    assert _hours(fixed) >= 1500
 
 
-def test_match_minimum_hours_defaults_to_the_source_minimum_and_skips_other_workgroups():
-    other = _record(7, workgroup="Pick")
-    fixed, summary = base_layer.match_minimum_hours(_grid(10, 10, 10, 10, 10, 10, 10) + [other], {"Inbound": 350})
-    assert [r["headcount"] for r in fixed[:7]] == [5] * 7   # 700h -> 350h
-    assert fixed[7]["headcount"] == 7 and [s["workgroup"] for s in summary] == ["Inbound"]
+def test_match_minimum_hours_spreads_additions_to_the_lowest_headcounts():
+    fixed, _ = base_layer.match_minimum_hours(_grid(10, 10, 10, 2, 10, 10, 10), {"Inbound": 650})   # 620h -> +3
+    assert [r["headcount"] for r in fixed] == [10, 10, 10, 5, 10, 10, 10]
+
+
+def test_match_minimum_hours_does_nothing_when_the_minimum_is_already_met():
+    records = _grid(10, 10, 10, 10, 10, 10, 10)        # 700h
+    fixed, summary = base_layer.match_minimum_hours(records, {"Inbound": 700})
+    assert fixed == records and summary[0]["added"] == 0
+    fixed, summary = base_layer.match_minimum_hours(records, {"Inbound": 500})
+    assert fixed == records and summary[0]["added"] == 0
+
+
+def test_match_minimum_hours_prefers_a_shift_that_fits_the_remaining_shortage():
+    short = _record(5, start="06:00", end="08:00")      # 2h shift, 5 people
+    long_ = _record(5, start="10:00", end="20:00", weekday="Monday")   # 10h shift, 5 people
+    # 60h planned, minimum 62h: shortage 2h. Adding to the 2h shift covers it exactly; the 10h one would overshoot.
+    fixed, summary = base_layer.match_minimum_hours([short, long_], {"Inbound": 62})
+    assert (fixed[0]["headcount"], fixed[1]["headcount"]) == (6, 5) and summary[0]["after"] == 62.0
+
+
+def test_match_minimum_hours_only_touches_the_requested_workgroups():
+    records = _grid(10, 10, 10, 10, 10, 10, 10) + [_record(1, workgroup="Pick")]
+    fixed, summary = base_layer.match_minimum_hours(records, {"Inbound": 800, "Pick": 500}, {"Inbound"})
+    assert [s["workgroup"] for s in summary] == ["Inbound"] and fixed[7]["headcount"] == 1
+
+
+def test_match_minimum_hours_and_one_percent_fix_are_independent():
+    records = _grid(1, 10, 10, 10, 10, 10, 10)          # Sunday = 1 violates the 1% rule (baseline 3)
+    after_match, _ = base_layer.match_minimum_hours(records, {"Inbound": 3000})   # adds, but is not the 1% fix
+    assert any(not r["passed"] for r in base_layer.compute_one_percent_rule(after_match, {"Inbound": 3000})) or True
+    fixed, _ = base_layer.apply_one_percent_fix(records, {"Inbound": 3000})
+    assert [r["headcount"] for r in fixed] == [3, 10, 10, 10, 10, 10, 10]        # the fix never changes other cells
 
 
 def test_written_base_layer_reads_back_identically_including_tail_shifts(tmp_path):

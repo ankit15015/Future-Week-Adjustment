@@ -41,24 +41,19 @@ hours**: the hours are confirmed automatically, and the 1% rule, **Match minimum
 downloads turn on for those workgroups. Leave a box empty to skip that workgroup; clear all boxes
 to turn the features off again.
 
-**Match minimum hours** (button in this step) scales the headcounts in the Source table so each
-workgroup's total hours (headcount x shift length, summed) reach the hours you entered - or the
-source's Minimum Hours if you have not entered any:
+**Match Minimum Hours.** When a workgroup's *planned* hours (headcount x shift length, summed)
+are below its Minimum Hours, a prompt appears under that workgroup: *"This file plans X h ... Add
+opportunities to cover it?"*. **Yes, add it** adds opportunities until the shortage is covered:
 
-- every non-zero headcount is multiplied by `target hours / current total hours` and **rounded up**
-  (so the new total is at or just above the target);
-- a headcount never goes below its shift's 1% baseline (step 4);
-- zero (empty) cells stay zero, and workgroups with no Minimum Hours are not touched.
+- it only ever **adds**, and does nothing for a workgroup that already meets its minimum;
+- additions go to shifts/days that already have opportunities (zero cells are left alone), always
+  to the lowest current headcount so they are spread evenly, preferring a shift whose length fits
+  the remaining shortage so the total does not overshoot more than necessary;
+- it runs for that one workgroup only, and it does **not** run the 1% fix (and the 1% fix does not
+  run it) - the two tools are independent.
 
-The result per workgroup is shown (`1519 h -> 1060 h`, factor, etc.). Because the headcounts change,
-any earlier match is discarded and the 1% rule is re-checked.
-
-**Downloading the Base Layer.** After you load a source, and again after each fix (*Match minimum
-hours* and *Fix all shortfalls*), a **Download Base Layer ...** link appears. It gives an `.xlsx`
-of the Base Layer exactly as it was at that moment (one block per workgroup, with total hours, the
-1% Rule per shift and the Minimum Hours), so you can keep the "after 1% fix" and "after minimum
-hours" versions separately. This works for every source type, including `.xlsb`, `.csv` and
-screenshots.
+The result is shown under the card (`Inbound: added 215 opportunities (1206 h -> 2001.5 h, minimum
+2000 h)`) with a download link for the Base Layer after the match.
 
 ## 4. 1% rule (only if the source has Minimum Hours)
 

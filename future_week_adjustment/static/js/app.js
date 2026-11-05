@@ -270,6 +270,7 @@ el('min-hours-manual-btn').addEventListener('click', async () => {
     el('one-percent-downloads').textContent = '';
     el('min-hours-downloads').textContent = '';
     el('match-min-hours-result').textContent = '';
+    Object.keys(matchMinHoursLines).forEach(k => delete matchMinHoursLines[k]);
     setupMinHoursStep();
     document.querySelectorAll('#min-hours-groups .min-hours-item').forEach(item => {
       const v = data.minimum_hours[item.dataset.workgroup];
@@ -334,20 +335,25 @@ async function runMinHoursValidation() {
     const resultEl = item.querySelector('.mh-result');
     let promptEl = item.querySelector('.mh-shortfall-prompt');
     if (promptEl) promptEl.remove();
+    const plannedShort = check.planned !== undefined && check.planned < check.required - 1e-9;
     if (check.passed) {
       item.classList.add('passed');
       resultEl.textContent = `OK — meets the required ${check.required} hours.`;
       resultEl.className = 'mh-result ok';
     } else {
       item.classList.add('failed');
-      const entered = check.entered !== null && check.entered !== undefined ? check.entered : 0;
-      const shortfall = (check.required - entered).toFixed(2);
       resultEl.textContent = `Short — needs ${check.required}, you entered ${check.entered ?? '(nothing)'}.`;
       resultEl.className = 'mh-result short';
+    }
+    if (!check.passed || plannedShort) {
+      const entered = check.entered !== null && check.entered !== undefined ? check.entered : 0;
+      const message = plannedShort
+        ? `This file plans ${check.planned} h for this workgroup, ${(check.required - check.planned).toFixed(2)} h short of the ${check.required} h minimum. Add opportunities to cover it?`
+        : `You're ${(check.required - entered).toFixed(2)} hours short of this source file's minimum. Add those hours?`;
       const prompt = document.createElement('div');
       prompt.className = 'mh-shortfall-prompt';
       prompt.innerHTML = `
-        You're ${shortfall} hours short of this source file's minimum. Add those hours?
+        ${escapeHtml(message)}
         <div class="mh-actions">
           <button class="primary small" data-action="add">Yes, add it</button>
           <button class="secondary small" data-action="skip">No</button>
@@ -355,7 +361,12 @@ async function runMinHoursValidation() {
       `;
       prompt.querySelector('[data-action="add"]').addEventListener('click', async () => {
         item.querySelector('input').value = check.required;
-        await runMinHoursValidation();
+        try {
+          if (plannedShort) await matchMinimumHoursFor(check.workgroup);
+          await runMinHoursValidation();
+        } catch (e) {
+          setStatus(el('min-hours-status'), 'Error: ' + e.message, 'error');
+        }
       });
       prompt.querySelector('[data-action="skip"]').addEventListener('click', () => {
         prompt.remove();
@@ -517,23 +528,26 @@ el('one-percent-fix-all-btn').addEventListener('click', async () => {
   }
 });
 
-// MATCH MINIMUM HOURS: scale headcounts so each workgroup's total hours reach its target.
-el('match-min-hours-btn').addEventListener('click', async () => {
+// MATCH MINIMUM HOURS (per workgroup, from the "Yes, add it" prompt): add opportunities until the
+// workgroup's planned hours reach its Minimum Hours. Independent of the 1% fix.
+const matchMinHoursLines = {};
+async function matchMinimumHoursFor(workgroup) {
+  await persistSourceRecords();    // include any edits made in the source table
+  const data = await api('/api/source/match-minimum-hours', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ workgroups: [workgroup] }),
+  });
+  adoptFixedRecords(data);
+  data.summary.forEach(s => {
+    matchMinHoursLines[s.workgroup] = `<div><strong>${escapeHtml(s.workgroup)}</strong>: added ${s.added} opportunit${s.added === 1 ? 'y' : 'ies'} ` +
+      `(${s.before} h &rarr; ${s.after} h, minimum ${s.target} h)</div>`;
+  });
   const out = el('match-min-hours-result');
-  try {
-    await persistSourceRecords();
-    const data = await api('/api/source/match-minimum-hours', { method: 'POST' });
-    adoptFixedRecords(data);
-    out.innerHTML = data.summary.map(s =>
-      `<div><strong>${escapeHtml(s.workgroup)}</strong>: ${s.before} h &rarr; ${s.after} h ` +
-      `(target ${s.target} h, headcounts &times; ${s.factor}, rounded up, kept at or above the 1% rule)</div>`).join('') +
-      '<div>Headcounts in the Source table above were updated. Re-confirm the minimum hours if you change the numbers.</div>';
-    out.className = 'status ok';
-    addDownloadLink(el('min-hours-downloads'), 'min_hours', 'Download Base Layer after minimum hours match');
-  } catch (e) {
-    setStatus(out, 'Error: ' + e.message, 'error');
-  }
-});
+  out.innerHTML = Object.values(matchMinHoursLines).join('');
+  out.className = 'status ok';
+  addDownloadLink(el('min-hours-downloads'), 'min_hours', 'Download Base Layer after minimum hours match');
+}
 
 // ---------------------------------------------------------------- destination
 

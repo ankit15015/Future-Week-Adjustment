@@ -208,14 +208,15 @@ def api_one_percent_fix():
 
 @app.route('/api/source/match-minimum-hours', methods=['POST'])
 def api_match_minimum_hours():
-    """MATCH MINIMUM HOURS: scale headcounts so each workgroup's total hours reach its target."""
+    """MATCH MINIMUM HOURS: add opportunities until the workgroup(s) reach their Minimum Hours."""
     sdata = get_session()
     if 'source_records' not in sdata:
         abort(400, description="Load a source file first.")
     if not sdata.get('minimum_hours'):
         abort(400, description="This source file has no Minimum Hours to match.")
+    wanted = (request.get_json(silent=True) or {}).get('workgroups')
     records, summary = base_layer.match_minimum_hours(
-        sdata['source_records'], sdata['minimum_hours'], sdata.get('min_hours_entries'))
+        sdata['source_records'], sdata['minimum_hours'], set(wanted) if wanted else None)
     sdata.setdefault('source_snapshots', {})['min_hours'] = records
     return _source_fix_response(sdata, records, summary=summary)
 
@@ -297,6 +298,7 @@ def api_minimum_hours_validate():
 
     checks = []
     all_ok = True
+    planned = base_layer.total_hours_by_workgroup(sdata['source_records'])
     for workgroup, required_hours in required.items():
         raw = entries.get(workgroup)
         try:
@@ -310,6 +312,7 @@ def api_minimum_hours_validate():
             'required': required_hours,
             'entered': entered,
             'passed': passed,
+            'planned': round(planned.get(workgroup, 0.0), 2),
         })
 
     sdata['min_hours_confirmed'] = all_ok

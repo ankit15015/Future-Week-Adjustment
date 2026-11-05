@@ -323,20 +323,26 @@ def test_one_percent_fix_endpoint_lifts_shortfalls_and_unlocks_the_destination(c
     assert upload(client, "/api/destination", dst).status_code == 200
 
 
-def test_match_minimum_hours_endpoint_scales_to_the_committed_hours(client, tmp_path):
-    _load_source_with_min_hours(client, tmp_path)
-    # Source hours: Day 10h x (10..16) + Late 9h x (20..26) -> committing to more hours than the minimum
-    client.post("/api/minimum-hours/validate", json={"entries": {"Inbound": 3500}})
-    r = client.post("/api/source/match-minimum-hours").get_json()
+def test_match_minimum_hours_endpoint_adds_opportunities_to_reach_the_minimum(client, tmp_path):
+    _load_source_with_min_hours(client, tmp_path)                 # Minimum Hours 3000; the file plans ~1,900 h
+    planned = client.post("/api/minimum-hours/validate", json={"entries": {"Inbound": 3000}}).get_json()["checks"][0]["planned"]
+    assert planned < 3000
+    r = client.post("/api/source/match-minimum-hours", json={"workgroups": ["Inbound"]}).get_json()
     s = r["summary"][0]
-    assert s["target"] == 3500 and s["after"] >= 3500 and s["after"] - 3500 < 100
-    assert all(x["passed"] for x in r["one_percent_rule"])           # the 1% floor still holds
+    assert s["target"] == 3000 and s["before"] == planned and s["after"] >= 3000 and s["added"] > 0
+    assert s["after"] - 3000 < 10                                   # overshoot is less than one long shift
+    after = client.post("/api/minimum-hours/validate", json={"entries": {"Inbound": 3000}}).get_json()["checks"][0]["planned"]
+    assert after == s["after"]
 
 
-def test_match_minimum_hours_defaults_to_the_source_minimum(client, tmp_path):
-    _load_source_with_min_hours(client, tmp_path)
-    s = client.post("/api/source/match-minimum-hours").get_json()["summary"][0]
-    assert s["target"] == 3000
+def test_match_minimum_hours_leaves_the_one_percent_rule_untouched(client, tmp_path):
+    loaded = _load_source_with_min_hours(client, tmp_path, headcount_overrides={("Day", "Sunday"): 1})
+    failing_before = [x for x in loaded["one_percent_rule"] if not x["passed"]]
+    r = client.post("/api/source/match-minimum-hours").get_json()
+    sunday = next(x for x in r["records"] if x["shift_name"] == "Day" and x["weekday"] == "Sunday")
+    assert failing_before and sunday["headcount"] >= 1               # only ever added to; never "fixed" by this tool
+    # 1% rule results are recomputed, and the fix is still a separate step
+    assert client.post("/api/source/one-percent-fix").status_code == 200
 
 
 def test_fixes_discard_stale_matches_and_need_minimum_hours(client, loaded_client, tmp_path):
@@ -384,7 +390,7 @@ def test_minimum_hours_can_be_entered_when_the_file_has_none(client, tmp_path):
     assert r["minimum_hours"] == {"Inbound": 3000.0} and len(r["one_percent_rule"]) == 14
 
     s = client.post("/api/source/match-minimum-hours").get_json()["summary"][0]      # now available
-    assert s["target"] == 3000
+    assert s["target"] == 3000 and s["added"] > 0
     assert client.get("/api/source/download?stage=min_hours").status_code == 200
 
     cleared = client.post("/api/minimum-hours/set", json={"hours": {"Inbound": ""}}).get_json()
