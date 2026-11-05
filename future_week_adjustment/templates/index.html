@@ -86,8 +86,8 @@
   <nav class="rail" id="step-rail">
     <ol>
       <li class="rail-step" data-rail="source"><span class="rail-dot"></span><span class="rail-label">Source</span></li>
-      <li class="rail-step" data-rail="min-hours"><span class="rail-dot"></span><span class="rail-label">Minimum hours</span></li>
       <li class="rail-step" data-rail="one-percent"><span class="rail-dot"></span><span class="rail-label">1% rule</span></li>
+      <li class="rail-step" data-rail="min-hours"><span class="rail-dot"></span><span class="rail-label">Minimum hours</span></li>
       <li class="rail-step" data-rail="dest"><span class="rail-dot"></span><span class="rail-label">Destination</span></li>
       <li class="rail-step" data-rail="match"><span class="rail-dot"></span><span class="rail-label">Match</span></li>
       <li class="rail-step" data-rail="reason"><span class="rail-dot"></span><span class="rail-label">Reason</span></li>
@@ -134,16 +134,6 @@
       <div id="min-hours-manual-status" class="status"></div>
     </section>
 
-    <section class="card hidden" id="step-min-hours">
-      <h2>Confirm minimum hours <span class="h2-sub">per workgroup</span></h2>
-      <p class="summary-line">This source file has a Minimum Hours requirement for the workgroup(s) below. Enter the hours you're committing to for each &mdash; you must meet or exceed the source file's minimum before you can load a destination file.</p>
-      <div id="min-hours-groups"></div>
-      <button id="min-hours-confirm-btn" class="primary">Confirm minimum hours</button>
-      <div id="match-min-hours-result" class="status"></div>
-      <div id="min-hours-downloads" class="download-row"></div>
-      <div id="min-hours-status" class="status"></div>
-    </section>
-
     <section class="card hidden" id="step-one-percent">
       <h2>1% rule verification <span class="h2-sub">checked automatically from the source file</span></h2>
       <p class="summary-line">For each shift, the baseline is ceil(workgroup's Minimum Hours &times; 1% &divide; shift length) &mdash; this matches the source file's own '1% Rule' figure. Every day of the week for that shift is then checked against its baseline individually.</p>
@@ -161,6 +151,16 @@
           <tbody></tbody>
         </table>
       </div>
+    </section>
+
+    <section class="card hidden" id="step-min-hours">
+      <h2>Confirm minimum hours <span class="h2-sub">per workgroup</span></h2>
+      <p class="summary-line">This source file has a Minimum Hours requirement for the workgroup(s) below. Enter the hours you're committing to for each &mdash; you must meet or exceed the source file's minimum before you can load a destination file.</p>
+      <div id="min-hours-groups"></div>
+      <button id="min-hours-confirm-btn" class="primary">Confirm minimum hours</button>
+      <div id="match-min-hours-result" class="status"></div>
+      <div id="min-hours-downloads" class="download-row"></div>
+      <div id="min-hours-status" class="status"></div>
     </section>
 
     <section class="card" id="step-dest">

@@ -29,7 +29,21 @@ press **Load selected**, or use **Upload file**.
 The parser looks for blocks with a `Shift`, `Start Time` and `End Time` header, weekday names
 above it, and a workgroup name per day column. Blocks it cannot read are reported as warnings.
 
-## 3. Minimum hours (only if the source has them)
+## 3. 1% rule (only if the source has Minimum Hours)
+
+Checked automatically. For each shift:
+
+```
+baseline = ceil(Minimum Hours x 1% / shift length in hours)
+```
+
+Every non-zero day of that shift is compared to the baseline (zero cells are ignored, as in the
+Base Layer sheet's own "1% Violation" column). A day below it fails; its shortfall is
+`baseline - headcount`. **Fix all shortfalls** (the *One Percent Fix*) raises every failing non-zero
+headcount to its baseline. You can also fix one row, or edit the Source table by hand. The
+destination step stays locked until nothing fails. Tick **Show passing days too** to see everything.
+
+## 4. Minimum hours (only if the source has them)
 
 If the source file states **Minimum Hours** for a workgroup, you must enter the hours you commit
 to for each one. You can only continue if each value meets or exceeds the source minimum.
@@ -54,20 +68,6 @@ opportunities to cover it?"*. **Yes, add it** adds opportunities until the short
 
 The result is shown under the card (`Inbound: added 215 opportunities (1206 h -> 2001.5 h, minimum
 2000 h)`) with a download link for the Base Layer after the match.
-
-## 4. 1% rule (only if the source has Minimum Hours)
-
-Checked automatically. For each shift:
-
-```
-baseline = ceil(Minimum Hours x 1% / shift length in hours)
-```
-
-Every non-zero day of that shift is compared to the baseline (zero cells are ignored, as in the
-Base Layer sheet's own "1% Violation" column). A day below it fails; its shortfall is
-`baseline - headcount`. **Fix all shortfalls** (the *One Percent Fix*) raises every failing non-zero
-headcount to its baseline. You can also fix one row, or edit the Source table by hand. The
-destination step stays locked until nothing fails. Tick **Show passing days too** to see everything.
 
 ## 5. Destination
 

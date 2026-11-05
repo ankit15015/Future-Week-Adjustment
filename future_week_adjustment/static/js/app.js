@@ -19,8 +19,8 @@ function updateStepRail() {
   const onePercentSkipped = sourceLoaded && state.onePercentResults.length === 0;
   const steps = [
     { key: 'source', done: sourceLoaded },
-    { key: 'min-hours', done: sourceLoaded && state.minHoursOk, skipped: minHoursSkipped },
     { key: 'one-percent', done: sourceLoaded && state.onePercentOk, skipped: onePercentSkipped },
+    { key: 'min-hours', done: sourceLoaded && state.minHoursOk, skipped: minHoursSkipped },
     { key: 'dest', done: state.destLoaded },
     { key: 'match', done: state.matchResults.length > 0 },
     { key: 'reason', done: state.reasonedResults.length > 0 },
